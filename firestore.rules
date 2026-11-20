@@ -1,0 +1,425 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Global Safety Net: Default-deny all unmatched paths
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // -------------------------------------------------------------------------
+    // Core Primitives
+    // -------------------------------------------------------------------------
+    function isSignedIn() {
+      return request.auth != null && request.auth.token.email_verified == true;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() >= 1 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isValidDateString(val) {
+      return val is string && val.size() == 10 && val.matches('^\\d{4}-\\d{2}-\\d{2}$');
+    }
+
+    function isValidOptionalDateString(val) {
+      return val is string && (val.size() == 0 || (val.size() == 10 && val.matches('^\\d{4}-\\d{2}-\\d{2}$')));
+    }
+
+    function isValidDivision(val) {
+      return val is string && val in ['percetakan', 'sablon'];
+    }
+
+    function isValidPaymentMethod(val) {
+      return val is string && val in ['tunai', 'transfer', 'qris'];
+    }
+
+    // -------------------------------------------------------------------------
+    // Validation Blueprints
+    // -------------------------------------------------------------------------
+    function isValidShopProfile(data) {
+      return data.keys().hasAll([
+          'ownerId', 'shopName', 'tagline', 'address', 'phone', 'ownerName',
+          'bankInfo', 'invoiceFooter', 'logoDataUrl', 'accentColor', 'invoicePrefix',
+          'createdAt', 'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'ownerId', 'shopName', 'tagline', 'address', 'phone', 'ownerName',
+          'bankInfo', 'invoiceFooter', 'logoDataUrl', 'accentColor', 'invoicePrefix',
+          'createdAt', 'updatedAt'
+        ])
+        && isValidId(data.ownerId)
+        && data.ownerId == request.auth.uid
+        && data.shopName is string && data.shopName.size() >= 1 && data.shopName.size() <= 100
+        && data.tagline is string && data.tagline.size() <= 140
+        && data.address is string && data.address.size() <= 300
+        && data.phone is string && data.phone.size() <= 40
+        && data.ownerName is string && data.ownerName.size() <= 100
+        && data.bankInfo is string && data.bankInfo.size() <= 300
+        && data.invoiceFooter is string && data.invoiceFooter.size() <= 300
+        && data.logoDataUrl is string && data.logoDataUrl.size() <= 150000
+        && data.accentColor is string && data.accentColor.size() == 7 && data.accentColor.matches('^#[0-9a-fA-F]{6}$')
+        && data.invoicePrefix is string && data.invoicePrefix.size() >= 1 && data.invoicePrefix.size() <= 16
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidProduct(data) {
+      return data.keys().hasAll([
+          'ownerId', 'name', 'division', 'unit', 'sellPrice', 'hppUnit',
+          'hppComponents', 'notes', 'createdAt', 'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'ownerId', 'name', 'division', 'unit', 'sellPrice', 'hppUnit',
+          'hppComponents', 'notes', 'createdAt', 'updatedAt'
+        ])
+        && isValidId(data.ownerId)
+        && data.ownerId == request.auth.uid
+        && data.name is string && data.name.size() >= 1 && data.name.size() <= 120
+        && isValidDivision(data.division)
+        && data.unit is string && data.unit.size() >= 1 && data.unit.size() <= 30
+        && data.sellPrice is number && data.sellPrice >= 0 && data.sellPrice <= 1000000000
+        && data.hppUnit is number && data.hppUnit >= 0 && data.hppUnit <= 1000000000
+        && data.hppComponents is list && data.hppComponents.size() <= 20
+        && (data.hppComponents.size() == 0 || data.hppComponents[0] is map)
+        && data.notes is string && data.notes.size() <= 300
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidOrder(data) {
+      return data.keys().hasAll([
+          'ownerId', 'invoiceNumber', 'customerName', 'customerPhone', 'division',
+          'orderDate', 'deadlineDate', 'items', 'discount', 'totalAmount', 'totalHpp',
+          'paidAmount', 'remainingAmount', 'paymentStatus', 'productionStatus',
+          'paymentMethod', 'notes', 'createdAt', 'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'ownerId', 'invoiceNumber', 'customerName', 'customerPhone', 'division',
+          'orderDate', 'deadlineDate', 'items', 'discount', 'totalAmount', 'totalHpp',
+          'paidAmount', 'remainingAmount', 'paymentStatus', 'productionStatus',
+          'paymentMethod', 'notes', 'createdAt', 'updatedAt'
+        ])
+        && isValidId(data.ownerId)
+        && data.ownerId == request.auth.uid
+        && data.invoiceNumber is string && data.invoiceNumber.size() >= 1 && data.invoiceNumber.size() <= 40
+        && data.customerName is string && data.customerName.size() >= 1 && data.customerName.size() <= 120
+        && data.customerPhone is string && data.customerPhone.size() <= 40
+        && isValidDivision(data.division)
+        && isValidDateString(data.orderDate)
+        && isValidOptionalDateString(data.deadlineDate)
+        && data.items is list && data.items.size() >= 1 && data.items.size() <= 30
+        && data.items[0] is map
+        && data.discount is number && data.discount >= 0 && data.discount <= 1000000000
+        && data.totalAmount is number && data.totalAmount >= 0 && data.totalAmount <= 10000000000
+        && data.totalHpp is number && data.totalHpp >= 0 && data.totalHpp <= 10000000000
+        && data.paidAmount is number && data.paidAmount >= 0 && data.paidAmount <= 10000000000
+        && data.remainingAmount is number && data.remainingAmount >= 0 && data.remainingAmount <= 10000000000
+        && data.paymentStatus is string && data.paymentStatus in ['belum_bayar', 'dp', 'lunas']
+        && data.productionStatus is string && data.productionStatus in ['antrean', 'proses', 'selesai', 'diambil']
+        && isValidPaymentMethod(data.paymentMethod)
+        && data.notes is string && data.notes.size() <= 500
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidTransaction(data) {
+      return data.keys().hasAll([
+          'ownerId', 'type', 'division', 'expenseGroup', 'category', 'description',
+          'amount', 'paymentMethod', 'date', 'referenceType', 'referenceId',
+          'createdAt', 'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'ownerId', 'type', 'division', 'expenseGroup', 'category', 'description',
+          'amount', 'paymentMethod', 'date', 'referenceType', 'referenceId',
+          'createdAt', 'updatedAt'
+        ])
+        && isValidId(data.ownerId)
+        && data.ownerId == request.auth.uid
+        && data.type is string && data.type in ['pemasukan', 'pengeluaran']
+        && data.division is string && data.division in ['percetakan', 'sablon', 'umum']
+        && data.expenseGroup is string && data.expenseGroup in ['penjualan', 'bahan_baku', 'gaji_karyawan', 'biaya_lain_lain']
+        && data.category is string && data.category.size() >= 1 && data.category.size() <= 80
+        && data.description is string && data.description.size() >= 1 && data.description.size() <= 250
+        && data.amount is number && data.amount > 0 && data.amount <= 10000000000
+        && isValidPaymentMethod(data.paymentMethod)
+        && isValidDateString(data.date)
+        && data.referenceType is string && data.referenceType in ['manual', 'order', 'material', 'payroll']
+        && data.referenceId is string && data.referenceId.size() <= 128
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidMaterial(data) {
+      return data.keys().hasAll([
+          'ownerId', 'name', 'category', 'division', 'stock', 'minStock',
+          'unit', 'lastBuyPrice', 'supplier', 'notes', 'createdAt', 'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'ownerId', 'name', 'category', 'division', 'stock', 'minStock',
+          'unit', 'lastBuyPrice', 'supplier', 'notes', 'createdAt', 'updatedAt'
+        ])
+        && isValidId(data.ownerId)
+        && data.ownerId == request.auth.uid
+        && data.name is string && data.name.size() >= 1 && data.name.size() <= 120
+        && data.category is string && data.category in ['tinta', 'kaos_kain', 'kertas_media', 'kimia_sablon', 'finishing', 'lainnya']
+        && isValidDivision(data.division)
+        && data.stock is number && data.stock >= 0 && data.stock <= 10000000
+        && data.minStock is number && data.minStock >= 0 && data.minStock <= 10000000
+        && data.unit is string && data.unit.size() >= 1 && data.unit.size() <= 30
+        && data.lastBuyPrice is number && data.lastBuyPrice >= 0 && data.lastBuyPrice <= 1000000000
+        && data.supplier is string && data.supplier.size() <= 120
+        && data.notes is string && data.notes.size() <= 300
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidEmployee(data) {
+      return data.keys().hasAll([
+          'ownerId', 'name', 'role', 'phone', 'payScheme', 'defaultRate',
+          'isActive', 'createdAt', 'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'ownerId', 'name', 'role', 'phone', 'payScheme', 'defaultRate',
+          'isActive', 'createdAt', 'updatedAt'
+        ])
+        && isValidId(data.ownerId)
+        && data.ownerId == request.auth.uid
+        && data.name is string && data.name.size() >= 1 && data.name.size() <= 120
+        && data.role is string && data.role.size() >= 1 && data.role.size() <= 80
+        && data.phone is string && data.phone.size() <= 40
+        && data.payScheme is string && data.payScheme in ['harian', 'borongan', 'campuran']
+        && data.defaultRate is number && data.defaultRate >= 0 && data.defaultRate <= 100000000
+        && data.isActive is bool
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidPayrollLog(data) {
+      return data.keys().hasAll([
+          'ownerId', 'employeeId', 'employeeName', 'employeeRole', 'workDate',
+          'payType', 'jobDescription', 'quantity', 'unitLabel', 'rate',
+          'bonus', 'deduction', 'netAmount', 'status', 'paidDate', 'notes',
+          'createdAt', 'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'ownerId', 'employeeId', 'employeeName', 'employeeRole', 'workDate',
+          'payType', 'jobDescription', 'quantity', 'unitLabel', 'rate',
+          'bonus', 'deduction', 'netAmount', 'status', 'paidDate', 'notes',
+          'createdAt', 'updatedAt'
+        ])
+        && isValidId(data.ownerId)
+        && data.ownerId == request.auth.uid
+        && isValidId(data.employeeId)
+        && data.employeeName is string && data.employeeName.size() >= 1 && data.employeeName.size() <= 120
+        && data.employeeRole is string && data.employeeRole.size() <= 80
+        && isValidDateString(data.workDate)
+        && data.payType is string && data.payType in ['harian', 'borongan']
+        && data.jobDescription is string && data.jobDescription.size() >= 1 && data.jobDescription.size() <= 200
+        && data.quantity is number && data.quantity > 0 && data.quantity <= 1000000
+        && data.unitLabel is string && data.unitLabel.size() >= 1 && data.unitLabel.size() <= 30
+        && data.rate is number && data.rate >= 0 && data.rate <= 100000000
+        && data.bonus is number && data.bonus >= 0 && data.bonus <= 100000000
+        && data.deduction is number && data.deduction >= 0 && data.deduction <= 100000000
+        && data.netAmount is number && data.netAmount >= 0 && data.netAmount <= 1000000000
+        && data.status is string && data.status in ['belum_dibayar', 'dibayar']
+        && isValidOptionalDateString(data.paidDate)
+        && data.notes is string && data.notes.size() <= 300
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    // -------------------------------------------------------------------------
+    // Collection Rules
+    // -------------------------------------------------------------------------
+
+    // 1. Shop Profiles (White-Label Identity, strictly private to owner)
+    match /shopProfiles/{userId} {
+      allow get: if isSignedIn() && isValidId(userId) && request.auth.uid == userId;
+      allow list: if false;
+      allow create: if isSignedIn()
+        && isValidId(userId)
+        && request.auth.uid == userId
+        && isValidShopProfile(incoming())
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time;
+      allow update: if isSignedIn()
+        && isValidId(userId)
+        && request.auth.uid == userId
+        && isValidShopProfile(incoming())
+        && incoming().ownerId == existing().ownerId
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time
+        && incoming().diff(existing()).affectedKeys().hasOnly([
+          'shopName', 'tagline', 'address', 'phone', 'ownerName',
+          'bankInfo', 'invoiceFooter', 'logoDataUrl', 'accentColor', 'invoicePrefix', 'updatedAt'
+        ]);
+      allow delete: if false;
+    }
+
+    // 2. Product Catalog & HPP
+    match /products/{productId} {
+      allow get: if isSignedIn() && isValidId(productId) && existing().ownerId == request.auth.uid;
+      allow list: if isSignedIn() && existing().ownerId == request.auth.uid;
+      allow create: if isSignedIn()
+        && isValidId(productId)
+        && isValidProduct(incoming())
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time;
+      allow update: if isSignedIn()
+        && isValidId(productId)
+        && isValidProduct(incoming())
+        && existing().ownerId == request.auth.uid
+        && incoming().ownerId == existing().ownerId
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time
+        && incoming().diff(existing()).affectedKeys().hasOnly([
+          'name', 'division', 'unit', 'sellPrice', 'hppUnit', 'hppComponents', 'notes', 'updatedAt'
+        ]);
+      allow delete: if isSignedIn() && isValidId(productId) && existing().ownerId == request.auth.uid;
+    }
+
+    // 3. Customer Orders (DP, Balance, Production Status)
+    match /orders/{orderId} {
+      allow get: if isSignedIn() && isValidId(orderId) && existing().ownerId == request.auth.uid;
+      allow list: if isSignedIn() && existing().ownerId == request.auth.uid;
+      allow create: if isSignedIn()
+        && isValidId(orderId)
+        && isValidOrder(incoming())
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time;
+      allow update: if isSignedIn()
+        && isValidId(orderId)
+        && isValidOrder(incoming())
+        && existing().ownerId == request.auth.uid
+        && incoming().ownerId == existing().ownerId
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time
+        && !(existing().paymentStatus == 'lunas' && existing().productionStatus == 'diambil')
+        && (
+          incoming().diff(existing()).affectedKeys().hasOnly(['paidAmount', 'remainingAmount', 'paymentStatus', 'paymentMethod', 'updatedAt'])
+          || incoming().diff(existing()).affectedKeys().hasOnly(['productionStatus', 'updatedAt'])
+          || incoming().diff(existing()).affectedKeys().hasOnly([
+            'customerName', 'customerPhone', 'division', 'orderDate', 'deadlineDate',
+            'items', 'discount', 'totalAmount', 'totalHpp', 'paidAmount', 'remainingAmount',
+            'paymentStatus', 'productionStatus', 'paymentMethod', 'notes', 'updatedAt'
+          ])
+        );
+      allow delete: if isSignedIn() && isValidId(orderId) && existing().ownerId == request.auth.uid;
+    }
+
+    // 4. Cash Ledger Transactions
+    match /transactions/{transactionId} {
+      allow get: if isSignedIn() && isValidId(transactionId) && existing().ownerId == request.auth.uid;
+      allow list: if isSignedIn() && existing().ownerId == request.auth.uid;
+      allow create: if isSignedIn()
+        && isValidId(transactionId)
+        && isValidTransaction(incoming())
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time;
+      allow update: if isSignedIn()
+        && isValidId(transactionId)
+        && isValidTransaction(incoming())
+        && existing().ownerId == request.auth.uid
+        && incoming().ownerId == existing().ownerId
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time
+        && incoming().diff(existing()).affectedKeys().hasOnly([
+          'type', 'division', 'expenseGroup', 'category', 'description',
+          'amount', 'paymentMethod', 'date', 'updatedAt'
+        ]);
+      allow delete: if isSignedIn() && isValidId(transactionId) && existing().ownerId == request.auth.uid;
+    }
+
+    // 5. Raw Materials Inventory
+    match /materials/{materialId} {
+      allow get: if isSignedIn() && isValidId(materialId) && existing().ownerId == request.auth.uid;
+      allow list: if isSignedIn() && existing().ownerId == request.auth.uid;
+      allow create: if isSignedIn()
+        && isValidId(materialId)
+        && isValidMaterial(incoming())
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time;
+      allow update: if isSignedIn()
+        && isValidId(materialId)
+        && isValidMaterial(incoming())
+        && existing().ownerId == request.auth.uid
+        && incoming().ownerId == existing().ownerId
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time
+        && (
+          incoming().diff(existing()).affectedKeys().hasOnly(['stock', 'lastBuyPrice', 'updatedAt'])
+          || incoming().diff(existing()).affectedKeys().hasOnly([
+            'name', 'category', 'division', 'stock', 'minStock', 'unit', 'lastBuyPrice', 'supplier', 'notes', 'updatedAt'
+          ])
+        );
+      allow delete: if isSignedIn() && isValidId(materialId) && existing().ownerId == request.auth.uid;
+    }
+
+    // 6. Employees
+    match /employees/{employeeId} {
+      allow get: if isSignedIn() && isValidId(employeeId) && existing().ownerId == request.auth.uid;
+      allow list: if isSignedIn() && existing().ownerId == request.auth.uid;
+      allow create: if isSignedIn()
+        && isValidId(employeeId)
+        && isValidEmployee(incoming())
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time;
+      allow update: if isSignedIn()
+        && isValidId(employeeId)
+        && isValidEmployee(incoming())
+        && existing().ownerId == request.auth.uid
+        && incoming().ownerId == existing().ownerId
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time
+        && incoming().diff(existing()).affectedKeys().hasOnly([
+          'name', 'role', 'phone', 'payScheme', 'defaultRate', 'isActive', 'updatedAt'
+        ]);
+      allow delete: if isSignedIn() && isValidId(employeeId) && existing().ownerId == request.auth.uid;
+    }
+
+    // 7. Payroll Logs (Daily & Piece-Rate Work Entries)
+    match /payrollLogs/{logId} {
+      allow get: if isSignedIn() && isValidId(logId) && existing().ownerId == request.auth.uid;
+      allow list: if isSignedIn() && existing().ownerId == request.auth.uid;
+      allow create: if isSignedIn()
+        && isValidId(logId)
+        && isValidPayrollLog(incoming())
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time
+        && exists(/databases/$(database)/documents/employees/$(incoming().employeeId))
+        && get(/databases/$(database)/documents/employees/$(incoming().employeeId)).data.ownerId == request.auth.uid;
+      allow update: if isSignedIn()
+        && isValidId(logId)
+        && isValidPayrollLog(incoming())
+        && existing().ownerId == request.auth.uid
+        && incoming().ownerId == existing().ownerId
+        && incoming().employeeId == existing().employeeId
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time
+        && existing().status != 'dibayar'
+        && (
+          incoming().diff(existing()).affectedKeys().hasOnly([
+            'employeeName', 'employeeRole', 'workDate', 'payType', 'jobDescription',
+            'quantity', 'unitLabel', 'rate', 'bonus', 'deduction', 'netAmount', 'notes', 'updatedAt'
+          ])
+          || (
+            incoming().status == 'dibayar'
+            && incoming().diff(existing()).affectedKeys().hasOnly(['status', 'paidDate', 'updatedAt'])
+          )
+        );
+      allow delete: if isSignedIn()
+        && isValidId(logId)
+        && existing().ownerId == request.auth.uid;
+    }
+  }
+}

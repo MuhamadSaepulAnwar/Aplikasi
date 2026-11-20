@@ -1,0 +1,6 @@
+{
+  "name": "CetakKas — Keuangan & Operasional Percetakan & Sablon",
+  "description": "Aplikasi web keuangan, order, HPP produk custom, katalog produk, stok bahan baku, dan penggajian karyawan bisnis percetakan & sablon yang sinkron online di PC dan HP dengan kustomisasi toko white-label.",
+  "requestFramePermissions": ["camera"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

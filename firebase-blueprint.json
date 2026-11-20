@@ -1,0 +1,285 @@
+{
+  "entities": {
+    "ShopProfile": {
+      "title": "ShopProfile",
+      "description": "Identitas toko white-label milik pengguna (nama toko, logo, alamat, kontak, rekening, aksen warna).",
+      "type": "object",
+      "properties": {
+        "ownerId": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "shopName": { "type": "string", "minLength": 1, "maxLength": 100 },
+        "tagline": { "type": "string", "maxLength": 140 },
+        "address": { "type": "string", "maxLength": 300 },
+        "phone": { "type": "string", "maxLength": 40 },
+        "ownerName": { "type": "string", "maxLength": 100 },
+        "bankInfo": { "type": "string", "maxLength": 300 },
+        "invoiceFooter": { "type": "string", "maxLength": 300 },
+        "logoDataUrl": { "type": "string", "maxLength": 150000 },
+        "accentColor": { "type": "string", "maxLength": 20, "pattern": "^#[0-9a-fA-F]{6}$" },
+        "invoicePrefix": { "type": "string", "minLength": 1, "maxLength": 16 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "ownerId",
+        "shopName",
+        "tagline",
+        "address",
+        "phone",
+        "ownerName",
+        "bankInfo",
+        "invoiceFooter",
+        "logoDataUrl",
+        "accentColor",
+        "invoicePrefix",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "Product": {
+      "title": "Product",
+      "description": "Katalog produk/jasa percetakan dan sablon beserta harga jual dan rincian HPP.",
+      "type": "object",
+      "properties": {
+        "ownerId": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "name": { "type": "string", "minLength": 1, "maxLength": 120 },
+        "division": { "type": "string", "enum": ["percetakan", "sablon"] },
+        "unit": { "type": "string", "minLength": 1, "maxLength": 30 },
+        "sellPrice": { "type": "number" },
+        "hppUnit": { "type": "number" },
+        "hppComponents": { "type": "array" },
+        "notes": { "type": "string", "maxLength": 300 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "ownerId",
+        "name",
+        "division",
+        "unit",
+        "sellPrice",
+        "hppUnit",
+        "hppComponents",
+        "notes",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "Order": {
+      "title": "Order",
+      "description": "Catatan order pelanggan, rincian item, DP, sisa pelunasan, dan status produksi.",
+      "type": "object",
+      "properties": {
+        "ownerId": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "invoiceNumber": { "type": "string", "minLength": 1, "maxLength": 40 },
+        "customerName": { "type": "string", "minLength": 1, "maxLength": 120 },
+        "customerPhone": { "type": "string", "maxLength": 40 },
+        "division": { "type": "string", "enum": ["percetakan", "sablon"] },
+        "orderDate": { "type": "string", "maxLength": 10, "pattern": "^\\d{4}-\\d{2}-\\d{2}$" },
+        "deadlineDate": { "type": "string", "maxLength": 10 },
+        "items": { "type": "array" },
+        "discount": { "type": "number" },
+        "totalAmount": { "type": "number" },
+        "totalHpp": { "type": "number" },
+        "paidAmount": { "type": "number" },
+        "remainingAmount": { "type": "number" },
+        "paymentStatus": { "type": "string", "enum": ["belum_bayar", "dp", "lunas"] },
+        "productionStatus": { "type": "string", "enum": ["antrean", "proses", "selesai", "diambil"] },
+        "paymentMethod": { "type": "string", "enum": ["tunai", "transfer", "qris"] },
+        "notes": { "type": "string", "maxLength": 500 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "ownerId",
+        "invoiceNumber",
+        "customerName",
+        "customerPhone",
+        "division",
+        "orderDate",
+        "deadlineDate",
+        "items",
+        "discount",
+        "totalAmount",
+        "totalHpp",
+        "paidAmount",
+        "remainingAmount",
+        "paymentStatus",
+        "productionStatus",
+        "paymentMethod",
+        "notes",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "Transaction": {
+      "title": "Transaction",
+      "description": "Catatan pemasukan dan pengeluaran buku kas harian termasuk bahan baku, gaji, dan biaya lain-lain.",
+      "type": "object",
+      "properties": {
+        "ownerId": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "type": { "type": "string", "enum": ["pemasukan", "pengeluaran"] },
+        "division": { "type": "string", "enum": ["percetakan", "sablon", "umum"] },
+        "expenseGroup": { "type": "string", "enum": ["penjualan", "bahan_baku", "gaji_karyawan", "biaya_lain_lain"] },
+        "category": { "type": "string", "minLength": 1, "maxLength": 80 },
+        "description": { "type": "string", "minLength": 1, "maxLength": 250 },
+        "amount": { "type": "number" },
+        "paymentMethod": { "type": "string", "enum": ["tunai", "transfer", "qris"] },
+        "date": { "type": "string", "maxLength": 10, "pattern": "^\\d{4}-\\d{2}-\\d{2}$" },
+        "referenceType": { "type": "string", "enum": ["manual", "order", "material", "payroll"] },
+        "referenceId": { "type": "string", "maxLength": 128 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "ownerId",
+        "type",
+        "division",
+        "expenseGroup",
+        "category",
+        "description",
+        "amount",
+        "paymentMethod",
+        "date",
+        "referenceType",
+        "referenceId",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "Material": {
+      "title": "Material",
+      "description": "Stok bahan baku percetakan dan sablon seperti tinta, kaos polos, kertas, film DTF.",
+      "type": "object",
+      "properties": {
+        "ownerId": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "name": { "type": "string", "minLength": 1, "maxLength": 120 },
+        "category": { "type": "string", "enum": ["tinta", "kaos_kain", "kertas_media", "kimia_sablon", "finishing", "lainnya"] },
+        "division": { "type": "string", "enum": ["percetakan", "sablon"] },
+        "stock": { "type": "number" },
+        "minStock": { "type": "number" },
+        "unit": { "type": "string", "minLength": 1, "maxLength": 30 },
+        "lastBuyPrice": { "type": "number" },
+        "supplier": { "type": "string", "maxLength": 120 },
+        "notes": { "type": "string", "maxLength": 300 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "ownerId",
+        "name",
+        "category",
+        "division",
+        "stock",
+        "minStock",
+        "unit",
+        "lastBuyPrice",
+        "supplier",
+        "notes",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "Employee": {
+      "title": "Employee",
+      "description": "Data karyawan workshop percetakan dan sablon.",
+      "type": "object",
+      "properties": {
+        "ownerId": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "name": { "type": "string", "minLength": 1, "maxLength": 120 },
+        "role": { "type": "string", "minLength": 1, "maxLength": 80 },
+        "phone": { "type": "string", "maxLength": 40 },
+        "payScheme": { "type": "string", "enum": ["harian", "borongan", "campuran"] },
+        "defaultRate": { "type": "number" },
+        "isActive": { "type": "boolean" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "ownerId",
+        "name",
+        "role",
+        "phone",
+        "payScheme",
+        "defaultRate",
+        "isActive",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "PayrollLog": {
+      "title": "PayrollLog",
+      "description": "Catatan pekerjaan harian atau borongan karyawan yang bisa diedit dan dicetak menjadi slip gaji.",
+      "type": "object",
+      "properties": {
+        "ownerId": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "employeeId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "employeeName": { "type": "string", "minLength": 1, "maxLength": 120 },
+        "employeeRole": { "type": "string", "maxLength": 80 },
+        "workDate": { "type": "string", "maxLength": 10, "pattern": "^\\d{4}-\\d{2}-\\d{2}$" },
+        "payType": { "type": "string", "enum": ["harian", "borongan"] },
+        "jobDescription": { "type": "string", "minLength": 1, "maxLength": 200 },
+        "quantity": { "type": "number" },
+        "unitLabel": { "type": "string", "minLength": 1, "maxLength": 30 },
+        "rate": { "type": "number" },
+        "bonus": { "type": "number" },
+        "deduction": { "type": "number" },
+        "netAmount": { "type": "number" },
+        "status": { "type": "string", "enum": ["belum_dibayar", "dibayar"] },
+        "paidDate": { "type": "string", "maxLength": 10 },
+        "notes": { "type": "string", "maxLength": 300 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "ownerId",
+        "employeeId",
+        "employeeName",
+        "employeeRole",
+        "workDate",
+        "payType",
+        "jobDescription",
+        "quantity",
+        "unitLabel",
+        "rate",
+        "bonus",
+        "deduction",
+        "netAmount",
+        "status",
+        "paidDate",
+        "notes",
+        "createdAt",
+        "updatedAt"
+      ]
+    }
+  },
+  "firestore": {
+    "/shopProfiles/{userId}": {
+      "schema": { "$ref": "#/entities/ShopProfile" },
+      "description": "Profil identitas toko white-label milik setiap pemilik usaha."
+    },
+    "/products/{productId}": {
+      "schema": { "$ref": "#/entities/Product" },
+      "description": "Katalog produk & jasa percetakan/sablon beserta HPP."
+    },
+    "/orders/{orderId}": {
+      "schema": { "$ref": "#/entities/Order" },
+      "description": "Data order pelanggan, DP, sisa pelunasan, dan status produksi."
+    },
+    "/transactions/{transactionId}": {
+      "schema": { "$ref": "#/entities/Transaction" },
+      "description": "Buku kas pemasukan dan pengeluaran harian (bahan baku, gaji, biaya lain-lain)."
+    },
+    "/materials/{materialId}": {
+      "schema": { "$ref": "#/entities/Material" },
+      "description": "Inventaris stok bahan baku percetakan dan sablon."
+    },
+    "/employees/{employeeId}": {
+      "schema": { "$ref": "#/entities/Employee" },
+      "description": "Daftar karyawan percetakan dan sablon."
+    },
+    "/payrollLogs/{logId}": {
+      "schema": { "$ref": "#/entities/PayrollLog" },
+      "description": "Catatan pekerjaan harian dan borongan karyawan untuk slip gaji."
+    }
+  }
+}

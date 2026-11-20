@@ -1,0 +1,88 @@
+@import "tailwindcss";
+@custom-variant dark (&:where(.dark, .dark *));
+
+@theme {
+  --font-sans: "Plus Jakarta Sans", ui-sans-serif, system-ui, -apple-system, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+}
+
+:root {
+  --bg-canvas: #0b0f17;
+  --bg-surface: #121824;
+  --bg-surface-hover: #182030;
+  --border-subtle: #232c3d;
+  --text-primary: #f8fafc;
+  --text-secondary: #94a3b8;
+  --shop-accent: #0ea5e9;
+  --shop-accent-soft: rgba(14, 165, 233, 0.14);
+}
+
+html,
+body {
+  background-color: var(--bg-canvas);
+  color: var(--text-primary);
+  font-family: var(--font-sans);
+  letter-spacing: 0.005em;
+}
+
+.tabular-nums {
+  font-variant-numeric: tabular-nums;
+}
+
+/* Custom subtle scrollbars for dark mode */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: #0b0f17;
+}
+::-webkit-scrollbar-thumb {
+  background: #263145;
+  border-radius: 9999px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #384763;
+}
+
+/* Safe area helper for mobile bottom nav */
+.pb-safe {
+  padding-bottom: max(0.5rem, env(safe-area-inset-bottom));
+}
+
+/* Print Stylesheet: Crisp White Paper for Invoices (A4 / 80mm Thermal) and Pay Slips */
+@media print {
+  @page {
+    margin: 10mm;
+  }
+
+  body,
+  html {
+    background: #ffffff !important;
+    color: #0f172a !important;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+
+  .no-print {
+    display: none !important;
+  }
+
+  .print-only-container {
+    position: static !important;
+    width: 100% !important;
+    max-width: none !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    box-shadow: none !important;
+    border: none !important;
+    background: #ffffff !important;
+    color: #0f172a !important;
+  }
+
+  .print-thermal-80mm {
+    width: 76mm !important;
+    margin: 0 auto !important;
+    font-size: 11px !important;
+  }
+}
