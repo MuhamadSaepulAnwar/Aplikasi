@@ -473,6 +473,24 @@ export const CashLedgerView: React.FC = () => {
                         <span>{tx.category}</span>
                         <span aria-hidden="true">·</span>
                         <span className="uppercase">{tx.paymentMethod}</span>
+                        {tx.referenceType === 'hpp' && (
+                          <>
+                            <span aria-hidden="true">·</span>
+                            <span className="text-sky-400 font-semibold">Otomatis dari Riwayat HPP</span>
+                          </>
+                        )}
+                        {tx.referenceType === 'order' && (
+                          <>
+                            <span aria-hidden="true">·</span>
+                            <span className="text-emerald-400 font-semibold">Pembayaran Order</span>
+                          </>
+                        )}
+                        {tx.referenceType === 'material' && (
+                          <>
+                            <span aria-hidden="true">·</span>
+                            <span className="text-purple-400 font-semibold">Stok Bahan</span>
+                          </>
+                        )}
                         {isKasbonTransaction(tx) && (
                           <>
                             <span aria-hidden="true">·</span>

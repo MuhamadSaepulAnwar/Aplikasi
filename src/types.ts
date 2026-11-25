@@ -7,7 +7,8 @@ export type PaymentStatus = 'belum_bayar' | 'dp' | 'lunas';
 export type ProductionStatus = 'antrean' | 'proses' | 'selesai' | 'diambil';
 export type TransactionType = 'pemasukan' | 'pengeluaran';
 export type ExpenseGroup = 'penjualan' | 'bahan_baku' | 'gaji_karyawan' | 'biaya_lain_lain';
-export type ReferenceType = 'manual' | 'order' | 'material' | 'payroll';
+export type ReferenceType = 'manual' | 'order' | 'material' | 'payroll' | 'hpp';
+export type HppSourceType = 'order' | 'manual';
 export type MaterialCategory =
   | 'tinta'
   | 'kaos_kain'
@@ -67,6 +68,74 @@ export interface Product {
   updatedAt?: Timestamp;
 }
 
+export interface HppRecord {
+  id: string;
+  ownerId: string;
+  sourceType: HppSourceType;
+  orderId: string;
+  invoiceNumber: string;
+  customerName: string;
+  division: Division;
+  recordDate: string; // YYYY-MM-DD
+  itemName: string;
+  qty: number;
+  unit: string;
+  sellPriceTotal: number;
+  hppUnit: number;
+  hppTotal: number;
+  boronganCost: number;
+  otherCost: number;
+  grossProfit: number;
+  netProfit: number;
+  hppComponents: HppComponent[];
+  syncToCash: boolean;
+  notes: string;
+  createdAt?: Timestamp;
+  updatedAt?: Timestamp;
+}
+
+export type ShirtPola = 'T-SHIRT' | 'RAGLAN' | '3/4' | 'B' | 'C';
+export type GarmentStyle = 'pendek' | 'panjang' | 'raglan' | 'oversize' | 'hoodie' | 'polo';
+export type MockupDisplayMode = 'template_overlay' | 'uploaded_mockup';
+
+export interface DesignPlacement {
+  x: number; // 0..100 (% horizontal)
+  y: number; // 0..100 (% vertical)
+  scale: number; // 10..100 (% width)
+}
+
+export interface ShirtSizeRow {
+  size: string;
+  pendek: number;
+  panjang: number;
+  tigaPerempat: number;
+  oversize: number;
+}
+
+export interface ShirtProductionSpec {
+  enabled: boolean;
+  orderTitle: string;
+  material: string;
+  shirtColor: string;
+  shirtColorHex: string;
+  sleeveColorHex?: string;
+  garmentStyle?: GarmentStyle;
+  inkType: string;
+  pola: ShirtPola;
+  frontDesignSize: string;
+  backDesignSize: string;
+  frontPlacement?: DesignPlacement;
+  backPlacement?: DesignPlacement;
+  mockupDisplayMode: MockupDisplayMode;
+  frontMockupDataUrl: string;
+  backMockupDataUrl: string;
+  swatchColors: string[];
+  sizeMatrix: ShirtSizeRow[];
+  sablonNotes: string;
+  sewingNotes: string;
+  finishingNotes: string;
+}
+
 export interface OrderItem {
   productId: string;
   name: string;
@@ -96,6 +165,7 @@ export interface Order {
   productionStatus: ProductionStatus;
   paymentMethod: PaymentMethod;
   notes: string;
+  shirtSpec?: ShirtProductionSpec;
   createdAt?: Timestamp;
   updatedAt?: Timestamp;
 }

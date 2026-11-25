@@ -18,6 +18,7 @@ import {
   exportRowsToCsv,
   formatRp,
   formatRpCompact,
+  summarizeHppRecords,
 } from '../lib/format';
 import { TimeframeKey } from '../types';
 
@@ -27,7 +28,12 @@ interface ReportsViewProps {
 }
 
 export const ReportsView: React.FC<ReportsViewProps> = ({ timeframe, onTimeframeChange }) => {
-  const { transactions, orders } = useWorkspace();
+  const { transactions, orders, hppRecords } = useWorkspace();
+
+  const hppTotals = useMemo(
+    () => summarizeHppRecords(hppRecords, timeframe),
+    [hppRecords, timeframe]
+  );
 
   const monthlySeries = useMemo(
     () => buildMonthlyProfitSeries(transactions, timeframe),
@@ -200,6 +206,56 @@ export const ReportsView: React.FC<ReportsViewProps> = ({ timeframe, onTimeframe
             }`}
           >
             {formatRp(totals.profitBersih)}
+          </div>
+        </div>
+      </div>
+
+      {/* Riwayat HPP P&L Summary */}
+      <div className="bg-[#121824] border border-[#232C3D] rounded-xl p-4 sm:p-5 space-y-3">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div>
+            <h3 className="text-sm font-bold text-[#F8FAFC]">
+              Rekap Laba Kotor &amp; Bersih Riwayat HPP ({activeMeta.label})
+            </h3>
+            <p className="text-xs text-[#94A3B8]">
+              Berdasarkan {hppTotals.count} catatan HPP order &amp; manual (dipotong modal HPP, gaji borongan &amp; biaya lain-lain).
+            </p>
+          </div>
+        </div>
+        <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
+          <div className="p-3 rounded-lg bg-[#0B0F17] border border-[#232C3D]">
+            <div className="text-[11px] text-[#94A3B8]">Penjualan HPP</div>
+            <div className="text-sm font-mono font-bold tabular-nums text-[#F8FAFC] mt-0.5">
+              {formatRp(hppTotals.sellPriceTotal)}
+            </div>
+          </div>
+          <div className="p-3 rounded-lg bg-[#0B0F17] border border-[#232C3D]">
+            <div className="text-[11px] text-[#94A3B8]">Modal HPP</div>
+            <div className="text-sm font-mono font-bold tabular-nums text-amber-400 mt-0.5">
+              {formatRp(hppTotals.hppTotal)}
+            </div>
+          </div>
+          <div className="p-3 rounded-lg bg-[#0B0F17] border border-[#232C3D]">
+            <div className="text-[11px] text-[#94A3B8]">Keuntungan Kotor</div>
+            <div className="text-sm font-mono font-bold tabular-nums text-sky-400 mt-0.5">
+              {formatRp(hppTotals.grossProfit)}
+            </div>
+          </div>
+          <div className="p-3 rounded-lg bg-[#0B0F17] border border-[#232C3D]">
+            <div className="text-[11px] text-[#94A3B8]">Borongan &amp; Lain</div>
+            <div className="text-sm font-mono font-bold tabular-nums text-rose-400 mt-0.5">
+              {formatRp(hppTotals.boronganCost + hppTotals.otherCost)}
+            </div>
+          </div>
+          <div className="col-span-2 sm:col-span-1 p-3 rounded-lg bg-[#0B0F17] border border-emerald-500/25">
+            <div className="text-[11px] text-[#94A3B8]">Keuntungan Bersih</div>
+            <div
+              className={`text-sm font-mono font-extrabold tabular-nums mt-0.5 ${
+                hppTotals.netProfit >= 0 ? 'text-emerald-400' : 'text-rose-400'
+              }`}
+            >
+              {formatRp(hppTotals.netProfit)}
+            </div>
           </div>
         </div>
       </div>

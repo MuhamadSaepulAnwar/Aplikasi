@@ -14,13 +14,15 @@ import {
   writeBatch,
 } from 'firebase/firestore';
 import { auth, db, handleFirestoreError, OperationType } from '../lib/firebase';
-import { formatRp, sanitizeString, todayISO } from '../lib/format';
+import { applyHppUnitToOrderItems, formatRp, sanitizeShirtSpec, sanitizeString, todayISO } from '../lib/format';
 import {
   CashDivision,
   Division,
   Employee,
   ExpenseGroup,
   HppComponent,
+  HppRecord,
+  HppSourceType,
   Material,
   MaterialCategory,
   Order,
@@ -33,6 +35,7 @@ import {
   Product,
   ProductionStatus,
   ReferenceType,
+  ShirtProductionSpec,
   ShopProfile,
   Transaction,
   TransactionType,
@@ -63,6 +66,7 @@ interface WorkspaceContextValue {
   materials: Material[];
   employees: Employee[];
   payrollLogs: PayrollLog[];
+  hppRecords: HppRecord[];
   notify: (text: string, type?: 'success' | 'error') => void;
   saveShopProfile: (updates: Omit<ShopProfile, 'ownerId' | 'createdAt' | 'updatedAt'>) => Promise<void>;
   saveProduct: (
@@ -92,8 +96,14 @@ interface WorkspaceContextValue {
       paymentMethod: PaymentMethod;
       productionStatus: ProductionStatus;
       notes: string;
+      shirtSpec?: ShirtProductionSpec;
     },
-    autoLogCash: boolean
+    autoLogCash: boolean,
+    hppOptions?: {
+      boronganCost?: number;
+      otherCost?: number;
+      syncHppToCash?: boolean;
+    }
   ) => Promise<string>;
   updateOrder: (
     id: string,
@@ -109,6 +119,13 @@ interface WorkspaceContextValue {
       paymentMethod: PaymentMethod;
       productionStatus: ProductionStatus;
       notes: string;
+      shirtSpec?: ShirtProductionSpec;
+    },
+    hppOptions?: {
+      boronganCost?: number;
+      otherCost?: number;
+      syncHppToCash?: boolean;
+      logPaidIncreaseToCash?: boolean;
     }
   ) => Promise<void>;
   recordOrderPayment: (
@@ -120,6 +137,29 @@ interface WorkspaceContextValue {
   ) => Promise<void>;
   updateOrderProductionStatus: (orderId: string, status: ProductionStatus) => Promise<void>;
   deleteOrder: (id: string) => Promise<void>;
+  saveHppRecord: (
+    data: {
+      sourceType: HppSourceType;
+      orderId?: string;
+      invoiceNumber?: string;
+      customerName?: string;
+      division: Division;
+      recordDate: string;
+      itemName: string;
+      qty: number;
+      unit: string;
+      sellPriceTotal: number;
+      hppUnit: number;
+      hppTotal: number;
+      boronganCost: number;
+      otherCost: number;
+      hppComponents: HppComponent[];
+      syncToCash: boolean;
+      notes: string;
+    },
+    editingId?: string
+  ) => Promise<string>;
+  deleteHppRecord: (record: HppRecord) => Promise<void>;
   saveTransaction: (
     data: {
       type: TransactionType;
@@ -234,6 +274,7 @@ export const WorkspaceProvider: React.FC<{ children: React.ReactNode }> = ({ chi
   const [materials, setMaterials] = useState<Material[]>([]);
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [payrollLogs, setPayrollLogs] = useState<PayrollLog[]>([]);
+  const [hppRecords, setHppRecords] = useState<HppRecord[]>([]);
   const [toasts, setToasts] = useState<ToastMessage[]>([]);
 
   const notify = useCallback((text: string, type: 'success' | 'error' = 'success') => {
@@ -260,6 +301,7 @@ export const WorkspaceProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         setMaterials([]);
         setEmployees([]);
         setPayrollLogs([]);
+        setHppRecords([]);
         setShopProfile({ ownerId: '', ...DEFAULT_PROFILE_BASE });
         setLoadingData(false);
       }
@@ -379,6 +421,21 @@ export const WorkspaceProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       (err) => handleFirestoreError(err, OperationType.LIST, 'payrollLogs')
     );
 
+    const qHpp = query(collection(db, 'hppRecords'), where('ownerId', '==', uid));
+    const unsubHpp = onSnapshot(
+      qHpp,
+      (snap) => {
+        const list = snap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<HppRecord, 'id'>) }));
+        list.sort(
+          (a, b) =>
+            (b.recordDate || '').localeCompare(a.recordDate || '') ||
+            (b.invoiceNumber || '').localeCompare(a.invoiceNumber || '')
+        );
+        setHppRecords(list);
+      },
+      (err) => handleFirestoreError(err, OperationType.LIST, 'hppRecords')
+    );
+
     return () => {
       unsubProfile();
       unsubProducts();
@@ -387,6 +444,7 @@ export const WorkspaceProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       unsubMaterials();
       unsubEmployees();
       unsubPayroll();
+      unsubHpp();
     };
   }, [authReady, user]);
 
@@ -509,6 +567,174 @@ export const WorkspaceProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     return { cleanItems, safeDiscount, totalAmount, totalHpp, safePaid, remainingAmount, paymentStatus };
   };
 
+  const syncHppCashTransactions = (
+    batch: ReturnType<typeof writeBatch>,
+    uid: string,
+    hppId: string,
+    params: {
+      syncToCash: boolean;
+      division: Division;
+      date: string;
+      label: string;
+      hppTotal: number;
+      boronganCost: number;
+      otherCost: number;
+      paymentMethod?: PaymentMethod;
+    }
+  ) => {
+    const validDate = /^\d{4}-\d{2}-\d{2}$/.test(params.date) ? params.date : todayISO();
+    const linked = transactions.filter(
+      (t) => t.referenceType === 'hpp' && t.referenceId === hppId
+    );
+    const labelClean = sanitizeString(params.label, 140) || 'Produksi';
+
+    const slots: Array<{
+      group: ExpenseGroup;
+      amount: number;
+      category: string;
+      description: string;
+    }> = [
+      {
+        group: 'bahan_baku',
+        amount: Math.max(0, Math.min(10_000_000_000, Math.round(Number(params.hppTotal) || 0))),
+        category: params.division === 'sablon' ? 'Modal HPP Sablon' : 'Modal HPP Percetakan',
+        description: sanitizeString(`Modal HPP: ${labelClean}`, 250),
+      },
+      {
+        group: 'gaji_karyawan',
+        amount: Math.max(0, Math.min(10_000_000_000, Math.round(Number(params.boronganCost) || 0))),
+        category: 'Gaji Borongan Produksi',
+        description: sanitizeString(`Gaji Borongan: ${labelClean}`, 250),
+      },
+      {
+        group: 'biaya_lain_lain',
+        amount: Math.max(0, Math.min(10_000_000_000, Math.round(Number(params.otherCost) || 0))),
+        category: 'Biaya Lain-Lain Produksi',
+        description: sanitizeString(`Biaya Lain-Lain: ${labelClean}`, 250),
+      },
+    ];
+
+    const matchedIds = new Set<string>();
+    for (const slot of slots) {
+      const existingForSlot = linked.filter((t) => t.expenseGroup === slot.group);
+      existingForSlot.forEach((t) => matchedIds.add(t.id));
+
+      if (params.syncToCash && slot.amount > 0) {
+        const primary = existingForSlot[0];
+        if (primary) {
+          batch.update(doc(db, 'transactions', primary.id), {
+            type: 'pengeluaran',
+            division: params.division,
+            expenseGroup: slot.group,
+            category: slot.category,
+            description: slot.description,
+            amount: slot.amount,
+            paymentMethod: primary.paymentMethod || params.paymentMethod || 'tunai',
+            date: validDate,
+            updatedAt: serverTimestamp(),
+          });
+          for (const extra of existingForSlot.slice(1)) {
+            batch.delete(doc(db, 'transactions', extra.id));
+          }
+        } else {
+          const txRef = doc(collection(db, 'transactions'));
+          batch.set(txRef, {
+            ownerId: uid,
+            type: 'pengeluaran',
+            division: params.division,
+            expenseGroup: slot.group,
+            category: slot.category,
+            description: slot.description,
+            amount: slot.amount,
+            paymentMethod: params.paymentMethod || 'tunai',
+            date: validDate,
+            referenceType: 'hpp',
+            referenceId: hppId,
+            createdAt: serverTimestamp(),
+            updatedAt: serverTimestamp(),
+          });
+        }
+      } else {
+        for (const t of existingForSlot) {
+          batch.delete(doc(db, 'transactions', t.id));
+        }
+      }
+    }
+
+    // Remove any orphaned hpp transactions for this record outside the 3 groups
+    for (const t of linked) {
+      if (!matchedIds.has(t.id)) {
+        batch.delete(doc(db, 'transactions', t.id));
+      }
+    }
+  };
+
+  const buildSanitizedHppFields = (
+    data: {
+      sourceType: HppSourceType;
+      orderId: string;
+      invoiceNumber: string;
+      customerName: string;
+      division: Division;
+      recordDate: string;
+      itemName: string;
+      qty: number;
+      unit: string;
+      sellPriceTotal: number;
+      hppUnit: number;
+      hppTotal: number;
+      boronganCost: number;
+      otherCost: number;
+      hppComponents: HppComponent[];
+      syncToCash: boolean;
+      notes: string;
+    }
+  ) => {
+    const qty = Math.max(1, Math.min(1_000_000, Math.round(Number(data.qty) || 1)));
+    const sellPriceTotal = Math.max(0, Math.min(10_000_000_000, Math.round(Number(data.sellPriceTotal) || 0)));
+    const hppTotal = Math.max(0, Math.min(10_000_000_000, Math.round(Number(data.hppTotal) || 0)));
+    const hppUnit = Math.max(
+      0,
+      Math.min(1_000_000_000, Math.round(Number(data.hppUnit) || Math.round(hppTotal / qty)))
+    );
+    const boronganCost = Math.max(0, Math.min(10_000_000_000, Math.round(Number(data.boronganCost) || 0)));
+    const otherCost = Math.max(0, Math.min(10_000_000_000, Math.round(Number(data.otherCost) || 0)));
+    const grossProfit = Math.max(-10_000_000_000, Math.min(10_000_000_000, sellPriceTotal - hppTotal));
+    const netProfit = Math.max(
+      -10_000_000_000,
+      Math.min(10_000_000_000, grossProfit - boronganCost - otherCost)
+    );
+    const cleanComponents = (data.hppComponents || []).slice(0, 20).map((c) => ({
+      label: sanitizeString(c.label, 80) || 'Komponen',
+      amount: Math.max(0, Math.min(1_000_000_000, Math.round(Number(c.amount) || 0))),
+      mode: c.mode === 'fixed' ? ('fixed' as const) : ('per_unit' as const),
+    }));
+    const validDate = /^\d{4}-\d{2}-\d{2}$/.test(data.recordDate) ? data.recordDate : todayISO();
+
+    return {
+      sourceType: data.sourceType,
+      orderId: data.sourceType === 'manual' ? '' : sanitizeString(data.orderId, 128),
+      invoiceNumber: sanitizeString(data.invoiceNumber, 40),
+      customerName: sanitizeString(data.customerName, 120),
+      division: data.division,
+      recordDate: validDate,
+      itemName: sanitizeString(data.itemName, 160) || 'Produksi Custom',
+      qty,
+      unit: sanitizeString(data.unit, 30) || 'pcs',
+      sellPriceTotal,
+      hppUnit,
+      hppTotal,
+      boronganCost,
+      otherCost,
+      grossProfit,
+      netProfit,
+      hppComponents: cleanComponents,
+      syncToCash: Boolean(data.syncToCash),
+      notes: sanitizeString(data.notes, 400),
+      updatedAt: serverTimestamp(),
+    };
+  };
+
   const createOrder = async (
     data: {
       invoiceNumber: string;
@@ -523,8 +749,14 @@ export const WorkspaceProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       paymentMethod: PaymentMethod;
       productionStatus: ProductionStatus;
       notes: string;
+      shirtSpec?: ShirtProductionSpec;
     },
-    autoLogCash: boolean
+    autoLogCash: boolean,
+    hppOptions?: {
+      boronganCost?: number;
+      otherCost?: number;
+      syncHppToCash?: boolean;
+    }
   ): Promise<string> => {
     if (!user) return '';
     const {
@@ -539,14 +771,16 @@ export const WorkspaceProvider: React.FC<{ children: React.ReactNode }> = ({ chi
 
     const orderDate = /^\d{4}-\d{2}-\d{2}$/.test(data.orderDate) ? data.orderDate : todayISO();
     const deadlineDate = /^\d{4}-\d{2}-\d{2}$/.test(data.deadlineDate) ? data.deadlineDate : '';
+    const cleanInvoice = sanitizeString(data.invoiceNumber, 40) || `INV-${Date.now()}`;
+    const cleanCustomer = sanitizeString(data.customerName, 120) || 'Pelanggan Umum';
 
     const orderRef = doc(collection(db, 'orders'));
     const batch = writeBatch(db);
 
-    batch.set(orderRef, {
+    const orderPayload: Record<string, unknown> = {
       ownerId: user.uid,
-      invoiceNumber: sanitizeString(data.invoiceNumber, 40) || `INV-${Date.now()}`,
-      customerName: sanitizeString(data.customerName, 120) || 'Pelanggan Umum',
+      invoiceNumber: cleanInvoice,
+      customerName: cleanCustomer,
       customerPhone: sanitizeString(data.customerPhone, 40),
       division: data.division,
       orderDate,
@@ -563,7 +797,13 @@ export const WorkspaceProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       notes: sanitizeString(data.notes, 500),
       createdAt: serverTimestamp(),
       updatedAt: serverTimestamp(),
-    });
+    };
+
+    if (data.shirtSpec && data.shirtSpec.enabled) {
+      orderPayload.shirtSpec = sanitizeShirtSpec(data.shirtSpec);
+    }
+
+    batch.set(orderRef, orderPayload);
 
     if (autoLogCash && safePaid > 0) {
       const txRef = doc(collection(db, 'transactions'));
@@ -574,7 +814,7 @@ export const WorkspaceProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         expenseGroup: 'penjualan',
         category: data.division === 'sablon' ? 'Order Sablon' : 'Order Percetakan',
         description: sanitizeString(
-          `${paymentStatus === 'lunas' ? 'Pelunasan' : 'DP'} ${data.invoiceNumber} — ${data.customerName}`,
+          `${paymentStatus === 'lunas' ? 'Pelunasan' : 'DP'} ${cleanInvoice} — ${cleanCustomer}`,
           250
         ),
         amount: safePaid,
@@ -587,12 +827,68 @@ export const WorkspaceProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       });
     }
 
+    const boronganCost = Math.max(0, Math.round(Number(hppOptions?.boronganCost) || 0));
+    const otherCost = Math.max(0, Math.round(Number(hppOptions?.otherCost) || 0));
+    const syncHppToCash = hppOptions?.syncHppToCash ?? true;
+    const hasCostInput = totalHpp > 0 || boronganCost > 0 || otherCost > 0;
+
+    if (hasCostInput) {
+      const totalQty = Math.max(
+        1,
+        cleanItems.reduce((s, it) => s + (Number(it.qty) || 0), 0)
+      );
+      const itemSummary = cleanItems
+        .map((it) => `${it.name}${cleanItems.length > 1 ? ` (${it.qty} ${it.unit})` : ''}`)
+        .join(', ');
+      const hppRef = doc(collection(db, 'hppRecords'));
+      const hppFields = buildSanitizedHppFields({
+        sourceType: 'order',
+        orderId: orderRef.id,
+        invoiceNumber: cleanInvoice,
+        customerName: cleanCustomer,
+        division: data.division,
+        recordDate: orderDate,
+        itemName: itemSummary,
+        qty: totalQty,
+        unit: cleanItems.length === 1 ? cleanItems[0].unit : 'pcs',
+        sellPriceTotal: totalAmount,
+        hppUnit: Math.round(totalHpp / totalQty),
+        hppTotal: totalHpp,
+        boronganCost,
+        otherCost,
+        hppComponents: [],
+        syncToCash: syncHppToCash,
+        notes: sanitizeString(data.notes, 400),
+      });
+
+      batch.set(hppRef, {
+        ownerId: user.uid,
+        ...hppFields,
+        createdAt: serverTimestamp(),
+      });
+
+      if (syncHppToCash) {
+        syncHppCashTransactions(batch, user.uid, hppRef.id, {
+          syncToCash: true,
+          division: data.division,
+          date: orderDate,
+          label: `${cleanInvoice} (${cleanCustomer}) — ${itemSummary}`,
+          hppTotal: totalHpp,
+          boronganCost,
+          otherCost,
+          paymentMethod: 'tunai',
+        });
+      }
+    }
+
     try {
       await batch.commit();
       notify(
-        autoLogCash && safePaid > 0
-          ? 'Order disimpan & pembayaran otomatis dicatat ke Buku Kas.'
-          : 'Order baru berhasil disimpan.'
+        hasCostInput
+          ? 'Order disimpan & otomatis masuk ke Riwayat HPP + Buku Kas.'
+          : autoLogCash && safePaid > 0
+            ? 'Order disimpan & pembayaran otomatis dicatat ke Buku Kas.'
+            : 'Order baru berhasil disimpan (HPP bisa dilengkapi di Riwayat HPP).'
       );
       return orderRef.id;
     } catch (err) {
@@ -614,8 +910,17 @@ export const WorkspaceProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       paymentMethod: PaymentMethod;
       productionStatus: ProductionStatus;
       notes: string;
+      shirtSpec?: ShirtProductionSpec;
+    },
+    hppOptions?: {
+      boronganCost?: number;
+      otherCost?: number;
+      syncHppToCash?: boolean;
+      logPaidIncreaseToCash?: boolean;
     }
   ) => {
+    if (!user) return;
+    const existingOrder = orders.find((o) => o.id === id);
     const {
       cleanItems,
       safeDiscount,
@@ -628,27 +933,135 @@ export const WorkspaceProvider: React.FC<{ children: React.ReactNode }> = ({ chi
 
     const orderDate = /^\d{4}-\d{2}-\d{2}$/.test(data.orderDate) ? data.orderDate : todayISO();
     const deadlineDate = /^\d{4}-\d{2}-\d{2}$/.test(data.deadlineDate) ? data.deadlineDate : '';
+    const cleanCustomer = sanitizeString(data.customerName, 120) || 'Pelanggan Umum';
+    const cleanInvoice = existingOrder?.invoiceNumber || '';
 
-    try {
-      await updateDoc(doc(db, 'orders', id), {
-        customerName: sanitizeString(data.customerName, 120) || 'Pelanggan Umum',
-        customerPhone: sanitizeString(data.customerPhone, 40),
+    const updatePayload: Record<string, unknown> = {
+      customerName: cleanCustomer,
+      customerPhone: sanitizeString(data.customerPhone, 40),
+      division: data.division,
+      orderDate,
+      deadlineDate,
+      items: cleanItems,
+      discount: safeDiscount,
+      totalAmount,
+      totalHpp,
+      paidAmount: safePaid,
+      remainingAmount,
+      paymentStatus,
+      productionStatus: data.productionStatus,
+      paymentMethod: data.paymentMethod,
+      notes: sanitizeString(data.notes, 500),
+      updatedAt: serverTimestamp(),
+    };
+
+    if (data.shirtSpec) {
+      updatePayload.shirtSpec = sanitizeShirtSpec(data.shirtSpec);
+    }
+
+    const batch = writeBatch(db);
+    batch.update(doc(db, 'orders', id), updatePayload);
+
+    // If user raised paidAmount while editing and wants the extra inflow in Cash Ledger
+    if (
+      hppOptions?.logPaidIncreaseToCash &&
+      existingOrder &&
+      safePaid > existingOrder.paidAmount
+    ) {
+      const paidDelta = safePaid - existingOrder.paidAmount;
+      const txRef = doc(collection(db, 'transactions'));
+      batch.set(txRef, {
+        ownerId: user.uid,
+        type: 'pemasukan',
         division: data.division,
-        orderDate,
-        deadlineDate,
-        items: cleanItems,
-        discount: safeDiscount,
-        totalAmount,
-        totalHpp,
-        paidAmount: safePaid,
-        remainingAmount,
-        paymentStatus,
-        productionStatus: data.productionStatus,
+        expenseGroup: 'penjualan',
+        category: data.division === 'sablon' ? 'Order Sablon' : 'Order Percetakan',
+        description: sanitizeString(
+          `${paymentStatus === 'lunas' ? 'Pelunasan' : 'Tambahan DP'} ${cleanInvoice} — ${cleanCustomer}`,
+          250
+        ),
+        amount: paidDelta,
         paymentMethod: data.paymentMethod,
-        notes: sanitizeString(data.notes, 500),
+        date: orderDate,
+        referenceType: 'order',
+        referenceId: id,
+        createdAt: serverTimestamp(),
         updatedAt: serverTimestamp(),
       });
-      notify('Order berhasil diperbarui.');
+    }
+
+    // Sync linked HppRecord if one exists OR if HPP/costs are provided
+    const existingHpp = hppRecords.find((h) => h.orderId === id);
+    const boronganCost =
+      hppOptions?.boronganCost !== undefined
+        ? Math.max(0, Math.round(Number(hppOptions.boronganCost) || 0))
+        : existingHpp?.boronganCost || 0;
+    const otherCost =
+      hppOptions?.otherCost !== undefined
+        ? Math.max(0, Math.round(Number(hppOptions.otherCost) || 0))
+        : existingHpp?.otherCost || 0;
+    const syncToCash =
+      hppOptions?.syncHppToCash !== undefined
+        ? hppOptions.syncHppToCash
+        : existingHpp
+          ? existingHpp.syncToCash
+          : true;
+
+    const totalQty = Math.max(
+      1,
+      cleanItems.reduce((s, it) => s + (Number(it.qty) || 0), 0)
+    );
+    const itemSummary = cleanItems
+      .map((it) => `${it.name}${cleanItems.length > 1 ? ` (${it.qty} ${it.unit})` : ''}`)
+      .join(', ');
+
+    if (existingHpp || totalHpp > 0 || boronganCost > 0 || otherCost > 0) {
+      const targetHppId = existingHpp ? existingHpp.id : doc(collection(db, 'hppRecords')).id;
+      const hppFields = buildSanitizedHppFields({
+        sourceType: 'order',
+        orderId: id,
+        invoiceNumber: cleanInvoice,
+        customerName: cleanCustomer,
+        division: data.division,
+        recordDate: orderDate,
+        itemName: itemSummary,
+        qty: totalQty,
+        unit: cleanItems.length === 1 ? cleanItems[0].unit : 'pcs',
+        sellPriceTotal: totalAmount,
+        hppUnit: Math.round(totalHpp / totalQty),
+        hppTotal: totalHpp,
+        boronganCost,
+        otherCost,
+        hppComponents: existingHpp?.hppComponents || [],
+        syncToCash,
+        notes: existingHpp?.notes || sanitizeString(data.notes, 400),
+      });
+
+      if (existingHpp) {
+        batch.update(doc(db, 'hppRecords', existingHpp.id), hppFields);
+      } else {
+        batch.set(doc(db, 'hppRecords', targetHppId), {
+          ownerId: user.uid,
+          ...hppFields,
+          createdAt: serverTimestamp(),
+        });
+      }
+
+      syncHppCashTransactions(batch, user.uid, targetHppId, {
+        syncToCash,
+        division: data.division,
+        date: orderDate,
+        label: `${cleanInvoice} (${cleanCustomer}) — ${itemSummary}`,
+        hppTotal: totalHpp,
+        boronganCost,
+        otherCost,
+        paymentMethod: 'tunai',
+      });
+    }
+
+    try {
+      await batch.commit();
+      notify('Order & data HPP terkait berhasil diperbarui.');
     } catch (err) {
       handleFirestoreError(err, OperationType.UPDATE, `orders/${id}`);
     }
@@ -726,11 +1139,170 @@ export const WorkspaceProvider: React.FC<{ children: React.ReactNode }> = ({ chi
   };
 
   const deleteOrder = async (id: string) => {
+    const batch = writeBatch(db);
+    batch.delete(doc(db, 'orders', id));
+
+    for (const tx of transactions) {
+      if (tx.referenceType === 'order' && tx.referenceId === id) {
+        batch.delete(doc(db, 'transactions', tx.id));
+      }
+    }
+
+    const linkedHpps = hppRecords.filter((h) => h.orderId === id);
+    for (const h of linkedHpps) {
+      batch.delete(doc(db, 'hppRecords', h.id));
+      for (const tx of transactions) {
+        if (tx.referenceType === 'hpp' && tx.referenceId === h.id) {
+          batch.delete(doc(db, 'transactions', tx.id));
+        }
+      }
+    }
+
     try {
-      await deleteDoc(doc(db, 'orders', id));
-      notify('Order berhasil dihapus.');
+      await batch.commit();
+      notify('Order & catatan terkait berhasil dihapus.');
     } catch (err) {
       handleFirestoreError(err, OperationType.DELETE, `orders/${id}`);
+    }
+  };
+
+  const saveHppRecord = async (
+    data: {
+      sourceType: HppSourceType;
+      orderId?: string;
+      invoiceNumber?: string;
+      customerName?: string;
+      division: Division;
+      recordDate: string;
+      itemName: string;
+      qty: number;
+      unit: string;
+      sellPriceTotal: number;
+      hppUnit: number;
+      hppTotal: number;
+      boronganCost: number;
+      otherCost: number;
+      hppComponents: HppComponent[];
+      syncToCash: boolean;
+      notes: string;
+    },
+    editingId?: string
+  ): Promise<string> => {
+    if (!user) return '';
+
+    const linkedOrder =
+      data.sourceType === 'order' && data.orderId
+        ? orders.find((o) => o.id === data.orderId)
+        : undefined;
+
+    const effectiveSourceType: HppSourceType = linkedOrder ? 'order' : 'manual';
+    const fields = buildSanitizedHppFields({
+      sourceType: effectiveSourceType,
+      orderId: linkedOrder ? linkedOrder.id : '',
+      invoiceNumber: linkedOrder ? linkedOrder.invoiceNumber : data.invoiceNumber || '',
+      customerName: linkedOrder ? linkedOrder.customerName : data.customerName || '',
+      division: data.division,
+      recordDate: data.recordDate,
+      itemName: data.itemName,
+      qty: data.qty,
+      unit: data.unit,
+      sellPriceTotal: data.sellPriceTotal,
+      hppUnit: data.hppUnit,
+      hppTotal: data.hppTotal,
+      boronganCost: data.boronganCost,
+      otherCost: data.otherCost,
+      hppComponents: data.hppComponents,
+      syncToCash: data.syncToCash,
+      notes: data.notes,
+    });
+
+    const batch = writeBatch(db);
+    const targetRef = editingId
+      ? doc(db, 'hppRecords', editingId)
+      : doc(collection(db, 'hppRecords'));
+
+    if (editingId) {
+      batch.update(targetRef, fields);
+    } else {
+      batch.set(targetRef, {
+        ownerId: user.uid,
+        ...fields,
+        createdAt: serverTimestamp(),
+      });
+    }
+
+    // Propagate HPP back to linked Order (without touching customer prices or totals)
+    if (linkedOrder) {
+      const orderQty = Math.max(
+        1,
+        (linkedOrder.items || []).reduce((s, it) => s + (Number(it.qty) || 0), 0)
+      );
+      const unitHppForOrder = Math.round(fields.hppTotal / orderQty);
+      batch.update(doc(db, 'orders', linkedOrder.id), {
+        items: applyHppUnitToOrderItems(linkedOrder.items, unitHppForOrder),
+        totalHpp: fields.hppTotal,
+        updatedAt: serverTimestamp(),
+      });
+    }
+
+    const label = fields.invoiceNumber
+      ? `${fields.invoiceNumber}${fields.customerName ? ` (${fields.customerName})` : ''} — ${fields.itemName}`
+      : `${fields.itemName}${fields.customerName ? ` (${fields.customerName})` : ''}`;
+
+    syncHppCashTransactions(batch, user.uid, targetRef.id, {
+      syncToCash: fields.syncToCash,
+      division: fields.division,
+      date: fields.recordDate,
+      label,
+      hppTotal: fields.hppTotal,
+      boronganCost: fields.boronganCost,
+      otherCost: fields.otherCost,
+      paymentMethod: 'tunai',
+    });
+
+    try {
+      await batch.commit();
+      notify(
+        editingId
+          ? 'Riwayat HPP & Buku Kas terkait berhasil diperbarui.'
+          : 'HPP berhasil dicatat ke Riwayat HPP & disinkronkan.'
+      );
+      return targetRef.id;
+    } catch (err) {
+      handleFirestoreError(
+        err,
+        editingId ? OperationType.UPDATE : OperationType.CREATE,
+        editingId ? `hppRecords/${editingId}` : 'hppRecords'
+      );
+    }
+  };
+
+  const deleteHppRecord = async (record: HppRecord) => {
+    const batch = writeBatch(db);
+    batch.delete(doc(db, 'hppRecords', record.id));
+
+    for (const tx of transactions) {
+      if (tx.referenceType === 'hpp' && tx.referenceId === record.id) {
+        batch.delete(doc(db, 'transactions', tx.id));
+      }
+    }
+
+    if (record.sourceType === 'order' && record.orderId) {
+      const linkedOrder = orders.find((o) => o.id === record.orderId);
+      if (linkedOrder) {
+        batch.update(doc(db, 'orders', linkedOrder.id), {
+          items: applyHppUnitToOrderItems(linkedOrder.items, 0),
+          totalHpp: 0,
+          updatedAt: serverTimestamp(),
+        });
+      }
+    }
+
+    try {
+      await batch.commit();
+      notify('Catatan Riwayat HPP & pengeluaran kas terkait dihapus.');
+    } catch (err) {
+      handleFirestoreError(err, OperationType.DELETE, `hppRecords/${record.id}`);
     }
   };
 
@@ -1249,6 +1821,7 @@ export const WorkspaceProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         materials,
         employees,
         payrollLogs,
+        hppRecords,
         notify,
         saveShopProfile,
         saveProduct,
@@ -1258,6 +1831,8 @@ export const WorkspaceProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         recordOrderPayment,
         updateOrderProductionStatus,
         deleteOrder,
+        saveHppRecord,
+        deleteHppRecord,
         saveTransaction,
         deleteTransaction,
         saveMaterial,

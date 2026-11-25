@@ -1,14 +1,16 @@
 import React, { useRef, useState } from 'react';
-import { X, Printer, Copy, Check, FileDown, Image as ImageIcon, Loader2 } from 'lucide-react';
+import { X, Printer, Copy, Check, FileDown, Image as ImageIcon, Loader2, Shirt, Edit3 } from 'lucide-react';
 import { Order, ShopProfile } from '../types';
 import { formatDateID, formatRp } from '../lib/format';
 import { exportElementToJpg, exportElementToPdf, printElementDocument } from '../lib/exportDocument';
 import { ShopLogo } from '../components/ShopLogo';
+import { ShirtPurchaseOrderSheet } from '../components/ShirtPurchaseOrderSheet';
 
 interface InvoiceModalProps {
   order: Order;
   shop: ShopProfile;
   onClose: () => void;
+  onEditOrder?: () => void;
 }
 
 function formatDateDMY(iso: string): string {
@@ -67,12 +69,15 @@ function parseBulletLines(raw: string): string[] {
   return results;
 }
 
-export const InvoiceModal: React.FC<InvoiceModalProps> = ({ order, shop, onClose }) => {
+export const InvoiceModal: React.FC<InvoiceModalProps> = ({ order, shop, onClose, onEditOrder }) => {
   const [printMode, setPrintMode] = useState<'a4' | 'thermal'>('a4');
   const [copied, setCopied] = useState(false);
   const [busyAction, setBusyAction] = useState<'print' | 'pdf' | 'jpg' | null>(null);
   const [exportError, setExportError] = useState('');
   const invoicePaperRef = useRef<HTMLDivElement | null>(null);
+  const poPaperRef = useRef<HTMLDivElement | null>(null);
+
+  const hasPage2 = Boolean(order.shirtSpec?.enabled);
 
   const invoiceAccent =
     !shop.accentColor || shop.accentColor.toUpperCase() === '#0EA5E9'
@@ -140,15 +145,25 @@ export const InvoiceModal: React.FC<InvoiceModalProps> = ({ order, shop, onClose
     }
   };
 
+  const getTargetPages = (): HTMLElement[] => {
+    const pages: HTMLElement[] = [];
+    if (invoicePaperRef.current) pages.push(invoicePaperRef.current);
+    if (printMode === 'a4' && hasPage2 && poPaperRef.current) {
+      pages.push(poPaperRef.current);
+    }
+    return pages;
+  };
+
   const baseFileName = `${printMode === 'thermal' ? 'Struk' : 'Invoice'}-${displayInvoiceNumber}-${order.customerName}`;
 
   const handlePrint = async () => {
-    if (!invoicePaperRef.current || busyAction) return;
+    const pages = getTargetPages();
+    if (pages.length === 0 || busyAction) return;
     setExportError('');
     setBusyAction('print');
     try {
       await printElementDocument(
-        invoicePaperRef.current,
+        pages,
         printMode,
         `${printMode === 'thermal' ? 'Struk' : 'Invoice'} ${displayInvoiceNumber} - ${shop.shopName}`
       );
@@ -161,11 +176,12 @@ export const InvoiceModal: React.FC<InvoiceModalProps> = ({ order, shop, onClose
   };
 
   const handleSavePdf = async () => {
-    if (!invoicePaperRef.current || busyAction) return;
+    const pages = getTargetPages();
+    if (pages.length === 0 || busyAction) return;
     setExportError('');
     setBusyAction('pdf');
     try {
-      await exportElementToPdf(invoicePaperRef.current, baseFileName, printMode);
+      await exportElementToPdf(pages, baseFileName, printMode);
     } catch (err) {
       setExportError(
         err instanceof Error ? err.message : 'Gagal membuat file PDF. Silakan coba lagi.'
@@ -176,11 +192,12 @@ export const InvoiceModal: React.FC<InvoiceModalProps> = ({ order, shop, onClose
   };
 
   const handleSaveJpg = async () => {
-    if (!invoicePaperRef.current || busyAction) return;
+    const pages = getTargetPages();
+    if (pages.length === 0 || busyAction) return;
     setExportError('');
     setBusyAction('jpg');
     try {
-      await exportElementToJpg(invoicePaperRef.current, baseFileName);
+      await exportElementToJpg(pages, baseFileName);
     } catch (err) {
       setExportError(
         err instanceof Error ? err.message : 'Gagal menyimpan gambar JPG. Silakan coba lagi.'
@@ -222,6 +239,17 @@ export const InvoiceModal: React.FC<InvoiceModalProps> = ({ order, shop, onClose
             </div>
 
             <div className="flex flex-wrap items-center gap-2">
+              {onEditOrder && (
+                <button
+                  type="button"
+                  onClick={onEditOrder}
+                  className="min-h-[38px] px-3 py-1.5 rounded-lg border border-sky-500/35 bg-sky-500/15 hover:bg-sky-500/25 text-xs font-bold text-sky-300 inline-flex items-center gap-1.5 transition-colors whitespace-nowrap cursor-pointer"
+                >
+                  <Edit3 className="w-3.5 h-3.5" />
+                  Ubah Nota &amp; Desain
+                </button>
+              )}
+
               <button
                 type="button"
                 onClick={handleCopyWhatsApp}
@@ -292,6 +320,32 @@ export const InvoiceModal: React.FC<InvoiceModalProps> = ({ order, shop, onClose
               </button>
             </div>
           </div>
+
+          {hasPage2 && (
+            <div className="flex flex-wrap items-center justify-between gap-2 text-xs bg-[#0B0F17] border border-[#232C3D] rounded-lg px-3 py-2">
+              <div className="flex items-center gap-2 text-[#CBD5E1]">
+                <Shirt className="w-3.5 h-3.5 text-sky-400 shrink-0" />
+                {printMode === 'a4' ? (
+                  <span>
+                    Dokumen terdiri dari <strong className="text-white">2 Halaman</strong>: Halaman 1 Invoice Pelanggan &amp; Halaman 2 Purchase Order Mockup Kaos.
+                  </span>
+                ) : (
+                  <span>
+                    Mockup Desain Kaos &amp; PO Produksi tersedia otomatis di mode <strong className="text-white">Invoice A4</strong> (Halaman 2).
+                  </span>
+                )}
+              </div>
+              {printMode === 'a4' && (
+                <button
+                  type="button"
+                  onClick={() => poPaperRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })}
+                  className="text-sky-400 hover:text-sky-300 font-semibold whitespace-nowrap cursor-pointer"
+                >
+                  Lihat Halaman 2
+                </button>
+              )}
+            </div>
+          )}
 
           {exportError && (
             <div className="text-xs text-rose-400 bg-rose-500/10 border border-rose-500/30 rounded-lg px-3 py-2">
@@ -636,6 +690,31 @@ export const InvoiceModal: React.FC<InvoiceModalProps> = ({ order, shop, onClose
             </div>
           )}
         </div>
+
+        {/* Page 2: Purchase Order / Mockup Desain Kaos (A4 Mode only) */}
+        {printMode === 'a4' && hasPage2 && order.shirtSpec && (
+          <>
+            <div className="no-print flex items-center gap-3 py-1">
+              <div className="flex-1 h-px bg-[#232C3D]" />
+              <span className="text-[11px] font-semibold text-[#94A3B8] whitespace-nowrap">
+                Halaman 2 · Purchase Order &amp; Mockup Desain Kaos
+              </span>
+              <div className="flex-1 h-px bg-[#232C3D]" />
+            </div>
+
+            <div
+              ref={poPaperRef}
+              className="print-only-container bg-white text-black rounded-xl shadow-2xl mx-auto border border-slate-200 w-full p-6 sm:p-8 text-sm"
+            >
+              <ShirtPurchaseOrderSheet
+                order={order}
+                shop={shop}
+                spec={order.shirtSpec}
+                displayInvoiceNumber={displayInvoiceNumber}
+              />
+            </div>
+          </>
+        )}
       </div>
     </div>
   );

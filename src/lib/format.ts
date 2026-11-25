@@ -1,8 +1,16 @@
 import {
   BestSellerRow,
+  DesignPlacement,
   Employee,
+  GarmentStyle,
+  HppRecord,
   MonthlyProfitRow,
   Order,
+  OrderItem,
+  ShirtPola,
+  ShirtProductionSpec,
+  ShirtSizeRow,
+  ShopProfile,
   TimeframeKey,
   Transaction,
 } from '../types';
@@ -354,3 +362,407 @@ export function getEmployeeKasbonTransactions(
     })
     .sort((a, b) => (a.date || '').localeCompare(b.date || ''));
 }
+
+export type OrderDueStatus =
+  | 'paid'
+  | 'overdue'
+  | 'due_today'
+  | 'due_soon'
+  | 'upcoming'
+  | 'no_deadline';
+
+export interface OrderDueInfo {
+  status: OrderDueStatus;
+  dueDate: string;
+  daysDiff: number; // positive = days remaining, negative = days overdue
+  overdueDays: number;
+  label: string;
+  shortLabel: string;
+}
+
+/**
+ * Computes signed day difference (targetISO - baseISO) safely in local calendar days.
+ */
+export function diffDaysISO(targetISO: string, baseISO = todayISO()): number {
+  const [ty, tm, td] = targetISO.slice(0, 10).split('-').map(Number);
+  const [by, bm, bd] = baseISO.slice(0, 10).split('-').map(Number);
+  if (!ty || !tm || !td || !by || !bm || !bd) return 0;
+  const targetMs = Date.UTC(ty, tm - 1, td);
+  const baseMs = Date.UTC(by, bm - 1, bd);
+  return Math.round((targetMs - baseMs) / 86_400_000);
+}
+
+/**
+ * Evaluates automatic due-date reminder status for orders with Belum Lunas / DP status.
+ */
+export function getOrderDueInfo(order: Order, referenceISO = todayISO()): OrderDueInfo {
+  if (order.paymentStatus === 'lunas' || order.remainingAmount <= 0) {
+    return {
+      status: 'paid',
+      dueDate: order.deadlineDate || '',
+      daysDiff: 0,
+      overdueDays: 0,
+      label: 'Lunas',
+      shortLabel: 'Lunas',
+    };
+  }
+
+  const dueDate = (order.deadlineDate || '').trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(dueDate)) {
+    return {
+      status: 'no_deadline',
+      dueDate: '',
+      daysDiff: 9999,
+      overdueDays: 0,
+      label: 'Jatuh tempo belum diatur',
+      shortLabel: 'Tanpa tenggat',
+    };
+  }
+
+  const daysDiff = diffDaysISO(dueDate, referenceISO);
+
+  if (daysDiff < 0) {
+    const overdueDays = Math.abs(daysDiff);
+    return {
+      status: 'overdue',
+      dueDate,
+      daysDiff,
+      overdueDays,
+      label: `Lewat tenggat ${overdueDays} hari`,
+      shortLabel: `Lewat ${overdueDays} hr`,
+    };
+  }
+
+  if (daysDiff === 0) {
+    return {
+      status: 'due_today',
+      dueDate,
+      daysDiff: 0,
+      overdueDays: 0,
+      label: 'Jatuh tempo hari ini',
+      shortLabel: 'Hari ini',
+    };
+  }
+
+  if (daysDiff <= 3) {
+    return {
+      status: 'due_soon',
+      dueDate,
+      daysDiff,
+      overdueDays: 0,
+      label: `Jatuh tempo ${daysDiff} hari lagi`,
+      shortLabel: `${daysDiff} hr lagi`,
+    };
+  }
+
+  return {
+    status: 'upcoming',
+    dueDate,
+    daysDiff,
+    overdueDays: 0,
+    label: `Jatuh tempo ${daysDiff} hari lagi`,
+    shortLabel: `${daysDiff} hr lagi`,
+  };
+}
+
+/**
+ * Formats a polite WhatsApp payment reminder message for a Belum Lunas / DP order.
+ */
+export function buildOrderReminderMessage(order: Order, shop: ShopProfile): string {
+  const due = getOrderDueInfo(order);
+  const statusLine =
+    due.status === 'overdue'
+      ? `Tenggat pelunasan pada *${formatDateID(due.dueDate)}* (lewat ${due.overdueDays} hari).`
+      : due.status === 'due_today'
+        ? `Tenggat pelunasan jatuh pada *hari ini (${formatDateID(due.dueDate)})*.`
+        : due.dueDate
+          ? `Estimasi jatuh tempo pelunasan: *${formatDateID(due.dueDate)}*.`
+          : '';
+
+  return [
+    `Halo Kak *${order.customerName}*,`,
+    `Kami dari *${shop.shopName}* ingin menginformasikan pengingat pelunasan order *${order.invoiceNumber}* (${order.items.map((i) => i.name).slice(0, 2).join(', ')}).`,
+    '',
+    `Total Order: ${formatRp(order.totalAmount)}`,
+    `Sudah Dibayar (DP): ${formatRp(order.paidAmount)}`,
+    `*Sisa Pelunasan: ${formatRp(order.remainingAmount)}*`,
+    statusLine,
+    shop.bankInfo ? `\nPembayaran dapat ditransfer ke:\n${shop.bankInfo}` : '',
+    '\nTerima kasih!',
+  ]
+    .filter(Boolean)
+    .join('\n');
+}
+
+export const SHIRT_SIZE_LABELS = ['XS', 'S', 'M', 'L', 'XL', '2XL', '3XL', '4XL', '5XL'] as const;
+export const SHIRT_POLA_OPTIONS: ShirtPola[] = ['T-SHIRT', 'RAGLAN', '3/4', 'B', 'C'];
+export const GARMENT_STYLE_OPTIONS: { id: GarmentStyle; label: string }[] = [
+  { id: 'pendek', label: 'Pendek' },
+  { id: 'panjang', label: 'Panjang' },
+  { id: 'raglan', label: 'Raglan' },
+  { id: 'oversize', label: 'Oversize' },
+  { id: 'hoodie', label: 'Hoodie' },
+  { id: 'polo', label: 'Polo' },
+];
+
+export const DEFAULT_FRONT_PLACEMENT: DesignPlacement = { x: 50, y: 42, scale: 38 };
+export const DEFAULT_BACK_PLACEMENT: DesignPlacement = { x: 50, y: 40, scale: 40 };
+
+export function createDefaultShirtSpec(): ShirtProductionSpec {
+  return {
+    enabled: false,
+    orderTitle: '',
+    material: 'Combed 30s',
+    shirtColor: '',
+    shirtColorHex: '#94A3B8',
+    sleeveColorHex: '#1E293B',
+    garmentStyle: 'pendek',
+    inkType: 'Plastisol',
+    pola: 'T-SHIRT',
+    frontDesignSize: '',
+    backDesignSize: '',
+    frontPlacement: { ...DEFAULT_FRONT_PLACEMENT },
+    backPlacement: { ...DEFAULT_BACK_PLACEMENT },
+    mockupDisplayMode: 'template_overlay',
+    frontMockupDataUrl: '',
+    backMockupDataUrl: '',
+    swatchColors: ['#FFFFFF', '#0284C7'],
+    sizeMatrix: SHIRT_SIZE_LABELS.map((size) => ({
+      size,
+      pendek: 0,
+      panjang: 0,
+      tigaPerempat: 0,
+      oversize: 0,
+    })),
+    sablonNotes: '',
+    sewingNotes: '',
+    finishingNotes: 'Press Doff',
+  };
+}
+
+export function getShirtSizeTotals(sizeMatrix: ShirtSizeRow[] = []) {
+  return sizeMatrix.reduce(
+    (acc, row) => {
+      const pdk = Math.max(0, Math.round(Number(row.pendek) || 0));
+      const pjg = Math.max(0, Math.round(Number(row.panjang) || 0));
+      const tp = Math.max(0, Math.round(Number(row.tigaPerempat) || 0));
+      const ovs = Math.max(0, Math.round(Number(row.oversize) || 0));
+      acc.pendek += pdk;
+      acc.panjang += pjg;
+      acc.tigaPerempat += tp;
+      acc.oversize += ovs;
+      acc.grandTotal += pdk + pjg + tp + ovs;
+      return acc;
+    },
+    { pendek: 0, panjang: 0, tigaPerempat: 0, oversize: 0, grandTotal: 0 }
+  );
+}
+
+/**
+ * Accepts ONLY PNG files and preserves full alpha transparency while scaling
+ * cleanly so the PNG data URL fits within the 330KB Firestore field limit.
+ */
+export function compressMockupImage(
+  file: File,
+  maxDim = 760,
+  maxLength = 320000
+): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const isPng =
+      file.type === 'image/png' || file.name.toLowerCase().endsWith('.png');
+    if (!isPng) {
+      reject(new Error('Desain hanya bisa diupload dalam format PNG (.png).'));
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onerror = () => reject(new Error('Gagal membaca file gambar PNG.'));
+    reader.onload = () => {
+      const img = new Image();
+      img.onerror = () => reject(new Error('File PNG tidak valid atau rusak.'));
+      img.onload = () => {
+        let currentDim = maxDim;
+        while (currentDim >= 220) {
+          const scale = Math.min(1, currentDim / Math.max(img.width, img.height));
+          const width = Math.max(1, Math.round(img.width * scale));
+          const height = Math.max(1, Math.round(img.height * scale));
+          const canvas = document.createElement('canvas');
+          canvas.width = width;
+          canvas.height = height;
+          const ctx = canvas.getContext('2d');
+          if (!ctx) {
+            reject(new Error('Canvas tidak tersedia.'));
+            return;
+          }
+          ctx.clearRect(0, 0, width, height);
+          ctx.drawImage(img, 0, 0, width, height);
+          const pngUrl = canvas.toDataURL('image/png');
+          if (pngUrl.length <= maxLength) {
+            resolve(pngUrl);
+            return;
+          }
+          currentDim = Math.round(currentDim * 0.8);
+        }
+        reject(
+          new Error(
+            'Ukuran file PNG terlalu besar setelah kompresi. Gunakan PNG beresolusi lebih ringkas.'
+          )
+        );
+      };
+      img.src = String(reader.result);
+    };
+    reader.readAsDataURL(file);
+  });
+}
+
+function sanitizePlacement(
+  p: DesignPlacement | undefined,
+  fallback: DesignPlacement
+): DesignPlacement {
+  if (!p) return { ...fallback };
+  const x = Number.isFinite(Number(p.x)) ? Math.max(5, Math.min(95, Math.round(Number(p.x)))) : fallback.x;
+  const y = Number.isFinite(Number(p.y)) ? Math.max(5, Math.min(95, Math.round(Number(p.y)))) : fallback.y;
+  const scale = Number.isFinite(Number(p.scale))
+    ? Math.max(10, Math.min(100, Math.round(Number(p.scale))))
+    : fallback.scale;
+  return { x, y, scale };
+}
+
+export function sanitizeShirtSpec(spec?: ShirtProductionSpec): ShirtProductionSpec {
+  const base = createDefaultShirtSpec();
+  if (!spec) return base;
+
+  const validPola: ShirtPola = SHIRT_POLA_OPTIONS.includes(spec.pola) ? spec.pola : 'T-SHIRT';
+  const validGarment: GarmentStyle = GARMENT_STYLE_OPTIONS.some((g) => g.id === spec.garmentStyle)
+    ? (spec.garmentStyle as GarmentStyle)
+    : 'pendek';
+  const validHex = /^#[0-9a-fA-F]{6}$/.test(spec.shirtColorHex || '')
+    ? spec.shirtColorHex
+    : base.shirtColorHex;
+  const validSleeveHex = /^#[0-9a-fA-F]{6}$/.test(spec.sleeveColorHex || '')
+    ? (spec.sleeveColorHex as string)
+    : base.sleeveColorHex!;
+  const validMode =
+    spec.mockupDisplayMode === 'uploaded_mockup' ? 'uploaded_mockup' : 'template_overlay';
+
+  const cleanSwatches = (spec.swatchColors || [])
+    .slice(0, 20)
+    .map((c) => (/^#[0-9a-fA-F]{6}$/.test(c || '') ? c : '#FFFFFF'));
+
+  const rowMap = new Map<string, ShirtSizeRow>();
+  for (const row of spec.sizeMatrix || []) {
+    const key = sanitizeString(row.size, 10).toUpperCase();
+    if (!key) continue;
+    rowMap.set(key, {
+      size: key,
+      pendek: Math.max(0, Math.min(100000, Math.round(Number(row.pendek) || 0))),
+      panjang: Math.max(0, Math.min(100000, Math.round(Number(row.panjang) || 0))),
+      tigaPerempat: Math.max(0, Math.min(100000, Math.round(Number(row.tigaPerempat) || 0))),
+      oversize: Math.max(0, Math.min(100000, Math.round(Number(row.oversize) || 0))),
+    });
+  }
+
+  const cleanMatrix: ShirtSizeRow[] = SHIRT_SIZE_LABELS.map(
+    (lbl) =>
+      rowMap.get(lbl) || {
+        size: lbl,
+        pendek: 0,
+        panjang: 0,
+        tigaPerempat: 0,
+        oversize: 0,
+      }
+  );
+
+  return {
+    enabled: Boolean(spec.enabled),
+    orderTitle: sanitizeString(spec.orderTitle, 100),
+    material: sanitizeString(spec.material, 80),
+    shirtColor: sanitizeString(spec.shirtColor, 80),
+    shirtColorHex: validHex,
+    sleeveColorHex: validSleeveHex,
+    garmentStyle: validGarment,
+    inkType: sanitizeString(spec.inkType, 80),
+    pola: validPola,
+    frontDesignSize: sanitizeString(spec.frontDesignSize, 60),
+    backDesignSize: sanitizeString(spec.backDesignSize, 60),
+    frontPlacement: sanitizePlacement(spec.frontPlacement, DEFAULT_FRONT_PLACEMENT),
+    backPlacement: sanitizePlacement(spec.backPlacement, DEFAULT_BACK_PLACEMENT),
+    mockupDisplayMode: validMode,
+    frontMockupDataUrl: (spec.frontMockupDataUrl || '').slice(0, 329000),
+    backMockupDataUrl: (spec.backMockupDataUrl || '').slice(0, 329000),
+    swatchColors: cleanSwatches.length > 0 ? cleanSwatches : ['#FFFFFF', '#0284C7'],
+    sizeMatrix: cleanMatrix,
+    sablonNotes: sanitizeString(spec.sablonNotes, 600),
+    sewingNotes: sanitizeString(spec.sewingNotes, 300),
+    finishingNotes: sanitizeString(spec.finishingNotes, 300),
+  };
+}
+
+export interface HppSummaryTotals {
+  count: number;
+  sellPriceTotal: number;
+  hppTotal: number;
+  boronganCost: number;
+  otherCost: number;
+  grossProfit: number;
+  netProfit: number;
+  grossMarginPercent: number;
+  netMarginPercent: number;
+}
+
+export function summarizeHppRecords(
+  records: HppRecord[],
+  timeframe: TimeframeKey | 'all' = 'all'
+): HppSummaryTotals {
+  let count = 0;
+  let sellPriceTotal = 0;
+  let hppTotal = 0;
+  let boronganCost = 0;
+  let otherCost = 0;
+  let grossProfit = 0;
+  let netProfit = 0;
+
+  for (const r of records) {
+    if (timeframe !== 'all' && !isDateInTimeframe(r.recordDate, timeframe)) continue;
+    count += 1;
+    sellPriceTotal += Number(r.sellPriceTotal) || 0;
+    hppTotal += Number(r.hppTotal) || 0;
+    boronganCost += Number(r.boronganCost) || 0;
+    otherCost += Number(r.otherCost) || 0;
+    grossProfit += Number(r.grossProfit) || 0;
+    netProfit += Number(r.netProfit) || 0;
+  }
+
+  return {
+    count,
+    sellPriceTotal,
+    hppTotal,
+    boronganCost,
+    otherCost,
+    grossProfit,
+    netProfit,
+    grossMarginPercent: sellPriceTotal > 0 ? (grossProfit / sellPriceTotal) * 100 : 0,
+    netMarginPercent: sellPriceTotal > 0 ? (netProfit / sellPriceTotal) * 100 : 0,
+  };
+}
+
+/**
+ * Finds orders that haven't had their HPP entered yet (either no HppRecord or totalHpp === 0).
+ */
+export function getOrdersWithoutHpp(orders: Order[], hppRecords: HppRecord[]): Order[] {
+  const linkedOrderIds = new Set(hppRecords.map((h) => h.orderId).filter(Boolean));
+  return orders.filter((o) => !linkedOrderIds.has(o.id) && (Number(o.totalHpp) || 0) <= 0);
+}
+
+/**
+ * Distributes an updated total HPP across an order's line items without changing prices or subtotals.
+ */
+export function applyHppUnitToOrderItems(items: OrderItem[], hppUnit: number): OrderItem[] {
+  const safeHppUnit = Math.max(0, Math.round(Number(hppUnit) || 0));
+  return (items || []).map((it) => ({
+    ...it,
+    hppUnit: safeHppUnit,
+  }));
+}
+
+

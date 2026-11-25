@@ -25,6 +25,7 @@ import { PayrollView } from './views/PayrollView';
 import { ReportsView } from './views/ReportsView';
 import { SettingsView } from './views/SettingsView';
 import { NavTab, OrderDraftFromHpp, TimeframeKey } from './types';
+import { getOrderDueInfo, getOrdersWithoutHpp } from './lib/format';
 
 const NAV_ITEMS: { id: NavTab; label: string; shortLabel: string; icon: React.ComponentType<{ className?: string }> }[] = [
   { id: 'dashboard', label: 'Dasbor', shortLabel: 'Dasbor', icon: LayoutDashboard },
@@ -40,11 +41,13 @@ const NAV_ITEMS: { id: NavTab; label: string; shortLabel: string; icon: React.Co
 const MOBILE_MORE_TABS: NavTab[] = ['materials', 'payroll', 'reports', 'settings'];
 
 const MainShell: React.FC = () => {
-  const { user, authReady, shopProfile, materials } = useWorkspace();
+  const { user, authReady, shopProfile, materials, orders, hppRecords } = useWorkspace();
   const [activeTab, setActiveTab] = useState<NavTab>('dashboard');
   const [timeframe, setTimeframe] = useState<TimeframeKey>('6m');
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [orderTrigger, setOrderTrigger] = useState(0);
+  const [overdueTrigger, setOverdueTrigger] = useState(0);
+  const [hppHistoryTrigger, setHppHistoryTrigger] = useState(0);
   const [draftFromHpp, setDraftFromHpp] = useState<OrderDraftFromHpp | null>(null);
 
   if (!authReady) {
@@ -60,6 +63,8 @@ const MainShell: React.FC = () => {
   }
 
   const lowStockCount = materials.filter((m) => m.stock <= m.minStock).length;
+  const overdueOrderCount = orders.filter((o) => getOrderDueInfo(o).status === 'overdue').length;
+  const uncostedOrderCount = getOrdersWithoutHpp(orders, hppRecords).length;
   const currentNavMeta = NAV_ITEMS.find((n) => n.id === activeTab) || NAV_ITEMS[0];
 
   const handleOpenQuickOrder = () => {
@@ -70,6 +75,18 @@ const MainShell: React.FC = () => {
   const handleSendDraftToOrder = (draft: OrderDraftFromHpp) => {
     setDraftFromHpp(draft);
     setActiveTab('orders');
+  };
+
+  const handleOpenOverdueOrders = () => {
+    setActiveTab('orders');
+    setOverdueTrigger((c) => c + 1);
+    setMobileMenuOpen(false);
+  };
+
+  const handleOpenHppHistory = () => {
+    setActiveTab('products');
+    setHppHistoryTrigger((c) => c + 1);
+    setMobileMenuOpen(false);
   };
 
   const handleNavigate = (tab: NavTab) => {
@@ -118,6 +135,19 @@ const MainShell: React.FC = () => {
                   />
                   <span className="truncate">{item.label}</span>
                 </span>
+                {item.id === 'orders' && overdueOrderCount > 0 && (
+                  <span className="px-1.5 py-0.5 rounded bg-rose-500/20 text-rose-400 text-[11px] font-mono font-bold tabular-nums">
+                    {overdueOrderCount}
+                  </span>
+                )}
+                {item.id === 'products' && uncostedOrderCount > 0 && (
+                  <span
+                    title="Order belum input HPP"
+                    className="px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-300 text-[11px] font-mono font-bold tabular-nums"
+                  >
+                    {uncostedOrderCount}
+                  </span>
+                )}
                 {item.id === 'materials' && lowStockCount > 0 && (
                   <span className="text-xs font-mono font-bold text-amber-400 tabular-nums">
                     {lowStockCount}
@@ -195,17 +225,23 @@ const MainShell: React.FC = () => {
               onTimeframeChange={setTimeframe}
               onNavigate={handleNavigate}
               onOpenQuickOrder={handleOpenQuickOrder}
+              onOpenOverdueOrders={handleOpenOverdueOrders}
+              onOpenHppHistory={handleOpenHppHistory}
             />
           )}
           {activeTab === 'orders' && (
             <OrdersView
               openNewTrigger={orderTrigger}
+              overdueFilterTrigger={overdueTrigger}
               draftFromHpp={draftFromHpp}
               onConsumeDraft={() => setDraftFromHpp(null)}
             />
           )}
           {activeTab === 'products' && (
-            <ProductsHppView onSendDraftToOrder={handleSendDraftToOrder} />
+            <ProductsHppView
+              onSendDraftToOrder={handleSendDraftToOrder}
+              focusHistoryTrigger={hppHistoryTrigger}
+            />
           )}
           {activeTab === 'cash' && <CashLedgerView />}
           {activeTab === 'materials' && <MaterialsView />}

@@ -86,6 +86,10 @@
         "productionStatus": { "type": "string", "enum": ["antrean", "proses", "selesai", "diambil"] },
         "paymentMethod": { "type": "string", "enum": ["tunai", "transfer", "qris"] },
         "notes": { "type": "string", "maxLength": 500 },
+        "shirtSpec": {
+          "type": "object",
+          "description": "Spesifikasi produksi kaos & mockup desain PNG (gaya kaos pendek/panjang/raglan/oversize/hoodie/polo, warna kaos & lengan custom, warna sablon multi-warna, posisi & skala desain custom, size matrix)."
+        },
         "createdAt": { "type": "string", "format": "date-time" },
         "updatedAt": { "type": "string", "format": "date-time" }
       },
@@ -125,7 +129,7 @@
         "amount": { "type": "number" },
         "paymentMethod": { "type": "string", "enum": ["tunai", "transfer", "qris"] },
         "date": { "type": "string", "maxLength": 10, "pattern": "^\\d{4}-\\d{2}-\\d{2}$" },
-        "referenceType": { "type": "string", "enum": ["manual", "order", "material", "payroll"] },
+        "referenceType": { "type": "string", "enum": ["manual", "order", "material", "payroll", "hpp"] },
         "referenceId": { "type": "string", "maxLength": 128 },
         "createdAt": { "type": "string", "format": "date-time" },
         "updatedAt": { "type": "string", "format": "date-time" }
@@ -250,6 +254,59 @@
         "createdAt",
         "updatedAt"
       ]
+    },
+    "HppRecord": {
+      "title": "HppRecord",
+      "description": "Riwayat HPP order dan input HPP manual lengkap dengan perhitungan keuntungan kotor, potongan gaji borongan, biaya lain-lain, dan keuntungan bersih.",
+      "type": "object",
+      "properties": {
+        "ownerId": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "sourceType": { "type": "string", "enum": ["order", "manual"] },
+        "orderId": { "type": "string", "maxLength": 128 },
+        "invoiceNumber": { "type": "string", "maxLength": 40 },
+        "customerName": { "type": "string", "maxLength": 120 },
+        "division": { "type": "string", "enum": ["percetakan", "sablon"] },
+        "recordDate": { "type": "string", "maxLength": 10, "pattern": "^\\d{4}-\\d{2}-\\d{2}$" },
+        "itemName": { "type": "string", "minLength": 1, "maxLength": 160 },
+        "qty": { "type": "number" },
+        "unit": { "type": "string", "minLength": 1, "maxLength": 30 },
+        "sellPriceTotal": { "type": "number" },
+        "hppUnit": { "type": "number" },
+        "hppTotal": { "type": "number" },
+        "boronganCost": { "type": "number" },
+        "otherCost": { "type": "number" },
+        "grossProfit": { "type": "number" },
+        "netProfit": { "type": "number" },
+        "hppComponents": { "type": "array" },
+        "syncToCash": { "type": "boolean" },
+        "notes": { "type": "string", "maxLength": 400 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "ownerId",
+        "sourceType",
+        "orderId",
+        "invoiceNumber",
+        "customerName",
+        "division",
+        "recordDate",
+        "itemName",
+        "qty",
+        "unit",
+        "sellPriceTotal",
+        "hppUnit",
+        "hppTotal",
+        "boronganCost",
+        "otherCost",
+        "grossProfit",
+        "netProfit",
+        "hppComponents",
+        "syncToCash",
+        "notes",
+        "createdAt",
+        "updatedAt"
+      ]
     }
   },
   "firestore": {
@@ -280,6 +337,10 @@
     "/payrollLogs/{logId}": {
       "schema": { "$ref": "#/entities/PayrollLog" },
       "description": "Catatan pekerjaan harian dan borongan karyawan untuk slip gaji."
+    },
+    "/hppRecords/{hppId}": {
+      "schema": { "$ref": "#/entities/HppRecord" },
+      "description": "Riwayat HPP order & input HPP manual beserta laba kotor, borongan, biaya lain-lain, dan laba bersih."
     }
   }
 }

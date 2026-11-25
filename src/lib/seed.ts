@@ -210,6 +210,34 @@ export async function seedSampleBusinessData(uid: string) {
         notes: 'Siap diambil besok pagi',
       },
       {
+        invoiceNumber: 'INV103',
+        customerName: 'Raka Pratama',
+        customerPhone: '081277889900',
+        division: 'sablon',
+        orderDate: monthsAgoISO(0, 14),
+        deadlineDate: monthsAgoISO(0, 19),
+        items: [
+          {
+            productId: '',
+            name: 'Kaos Hitam 24s L + Sablon',
+            qty: 1,
+            unit: 'pcs',
+            price: 75000,
+            hppUnit: 0,
+            subtotal: 75000,
+          },
+        ],
+        discount: 0,
+        totalAmount: 75000,
+        totalHpp: 0,
+        paidAmount: 75000,
+        remainingAmount: 0,
+        paymentStatus: 'lunas',
+        productionStatus: 'selesai',
+        paymentMethod: 'transfer',
+        notes: 'Order contoh yang HPP-nya belum dimasukkan (siap dipilih di Riwayat HPP)',
+      },
+      {
         invoiceNumber: 'INV094',
         customerName: 'PT Sinar Karya Mandiri',
         customerPhone: '081398765432',
@@ -240,12 +268,50 @@ export async function seedSampleBusinessData(uid: string) {
     ];
 
     for (const o of sampleOrders) {
-      await addDoc(collection(db, 'orders'), {
+      const orderRef = doc(collection(db, 'orders'));
+      await setDoc(orderRef, {
         ownerId: uid,
         ...o,
         createdAt: serverTimestamp(),
         updatedAt: serverTimestamp(),
       });
+
+      if (o.totalHpp > 0) {
+        const totalQty = Math.max(
+          1,
+          o.items.reduce((s, it) => s + (Number(it.qty) || 0), 0)
+        );
+        const boronganCost = o.invoiceNumber === 'INV101' ? 175000 : o.invoiceNumber === 'INV094' ? 250000 : 90000;
+        const otherCost = o.invoiceNumber === 'INV101' ? 75000 : o.invoiceNumber === 'INV094' ? 150000 : 45000;
+        const grossProfit = o.totalAmount - o.totalHpp;
+        const netProfit = grossProfit - boronganCost - otherCost;
+        const itemSummary = o.items.map((it) => it.name).join(', ').slice(0, 160);
+
+        await addDoc(collection(db, 'hppRecords'), {
+          ownerId: uid,
+          sourceType: 'order',
+          orderId: orderRef.id,
+          invoiceNumber: o.invoiceNumber,
+          customerName: o.customerName,
+          division: o.division,
+          recordDate: o.orderDate,
+          itemName: itemSummary,
+          qty: totalQty,
+          unit: o.items[0]?.unit || 'pcs',
+          sellPriceTotal: o.totalAmount,
+          hppUnit: Math.round(o.totalHpp / totalQty),
+          hppTotal: o.totalHpp,
+          boronganCost,
+          otherCost,
+          grossProfit,
+          netProfit,
+          hppComponents: [],
+          syncToCash: false,
+          notes: o.notes,
+          createdAt: serverTimestamp(),
+          updatedAt: serverTimestamp(),
+        });
+      }
     }
 
     // 4. Sample Multi-Month Cash Transactions (so 1m, 2m, 3m, 6m, 1y charts & Monthly Net Profit shine)

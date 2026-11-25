@@ -96,6 +96,55 @@ service cloud.firestore {
         && data.updatedAt is timestamp;
     }
 
+    function isValidDesignPlacement(p) {
+      return p is map
+        && p.keys().hasAll(['x', 'y', 'scale'])
+        && p.keys().hasOnly(['x', 'y', 'scale'])
+        && p.x is number && p.x >= 0 && p.x <= 100
+        && p.y is number && p.y >= 0 && p.y <= 100
+        && p.scale is number && p.scale >= 10 && p.scale <= 100;
+    }
+
+    function isValidShirtSpec(spec) {
+      return spec is map
+        && spec.keys().hasAll([
+          'enabled', 'orderTitle', 'material', 'shirtColor', 'shirtColorHex',
+          'inkType', 'pola', 'frontDesignSize', 'backDesignSize',
+          'mockupDisplayMode', 'frontMockupDataUrl', 'backMockupDataUrl',
+          'swatchColors', 'sizeMatrix', 'sablonNotes', 'sewingNotes', 'finishingNotes'
+        ])
+        && spec.keys().hasOnly([
+          'enabled', 'orderTitle', 'material', 'shirtColor', 'shirtColorHex',
+          'inkType', 'pola', 'frontDesignSize', 'backDesignSize',
+          'mockupDisplayMode', 'frontMockupDataUrl', 'backMockupDataUrl',
+          'swatchColors', 'sizeMatrix', 'sablonNotes', 'sewingNotes', 'finishingNotes',
+          'garmentStyle', 'sleeveColorHex', 'frontPlacement', 'backPlacement'
+        ])
+        && spec.enabled is bool
+        && spec.orderTitle is string && spec.orderTitle.size() <= 100
+        && spec.material is string && spec.material.size() <= 80
+        && spec.shirtColor is string && spec.shirtColor.size() <= 80
+        && spec.shirtColorHex is string && spec.shirtColorHex.size() == 7 && spec.shirtColorHex.matches('^#[0-9a-fA-F]{6}$')
+        && spec.inkType is string && spec.inkType.size() <= 80
+        && spec.pola is string && spec.pola in ['T-SHIRT', 'RAGLAN', '3/4', 'B', 'C']
+        && spec.frontDesignSize is string && spec.frontDesignSize.size() <= 60
+        && spec.backDesignSize is string && spec.backDesignSize.size() <= 60
+        && spec.mockupDisplayMode is string && spec.mockupDisplayMode in ['template_overlay', 'uploaded_mockup']
+        && spec.frontMockupDataUrl is string && spec.frontMockupDataUrl.size() <= 330000
+        && spec.backMockupDataUrl is string && spec.backMockupDataUrl.size() <= 330000
+        && spec.swatchColors is list && spec.swatchColors.size() <= 20
+        && (spec.swatchColors.size() == 0 || (spec.swatchColors[0] is string && spec.swatchColors[0].size() <= 7))
+        && spec.sizeMatrix is list && spec.sizeMatrix.size() <= 12
+        && (spec.sizeMatrix.size() == 0 || spec.sizeMatrix[0] is map)
+        && spec.sablonNotes is string && spec.sablonNotes.size() <= 600
+        && spec.sewingNotes is string && spec.sewingNotes.size() <= 300
+        && spec.finishingNotes is string && spec.finishingNotes.size() <= 300
+        && (!('garmentStyle' in spec) || (spec.garmentStyle is string && spec.garmentStyle in ['pendek', 'panjang', 'raglan', 'oversize', 'hoodie', 'polo']))
+        && (!('sleeveColorHex' in spec) || (spec.sleeveColorHex is string && spec.sleeveColorHex.size() == 7 && spec.sleeveColorHex.matches('^#[0-9a-fA-F]{6}$')))
+        && (!('frontPlacement' in spec) || isValidDesignPlacement(spec.frontPlacement))
+        && (!('backPlacement' in spec) || isValidDesignPlacement(spec.backPlacement));
+    }
+
     function isValidOrder(data) {
       return data.keys().hasAll([
           'ownerId', 'invoiceNumber', 'customerName', 'customerPhone', 'division',
@@ -107,7 +156,7 @@ service cloud.firestore {
           'ownerId', 'invoiceNumber', 'customerName', 'customerPhone', 'division',
           'orderDate', 'deadlineDate', 'items', 'discount', 'totalAmount', 'totalHpp',
           'paidAmount', 'remainingAmount', 'paymentStatus', 'productionStatus',
-          'paymentMethod', 'notes', 'createdAt', 'updatedAt'
+          'paymentMethod', 'notes', 'shirtSpec', 'createdAt', 'updatedAt'
         ])
         && isValidId(data.ownerId)
         && data.ownerId == request.auth.uid
@@ -128,6 +177,7 @@ service cloud.firestore {
         && data.productionStatus is string && data.productionStatus in ['antrean', 'proses', 'selesai', 'diambil']
         && isValidPaymentMethod(data.paymentMethod)
         && data.notes is string && data.notes.size() <= 500
+        && (!('shirtSpec' in data) || isValidShirtSpec(data.shirtSpec))
         && data.createdAt is timestamp
         && data.updatedAt is timestamp;
     }
@@ -153,7 +203,7 @@ service cloud.firestore {
         && data.amount is number && data.amount > 0 && data.amount <= 10000000000
         && isValidPaymentMethod(data.paymentMethod)
         && isValidDateString(data.date)
-        && data.referenceType is string && data.referenceType in ['manual', 'order', 'material', 'payroll']
+        && data.referenceType is string && data.referenceType in ['manual', 'order', 'material', 'payroll', 'hpp']
         && data.referenceId is string && data.referenceId.size() <= 128
         && data.createdAt is timestamp
         && data.updatedAt is timestamp;
@@ -238,6 +288,48 @@ service cloud.firestore {
         && data.updatedAt is timestamp;
     }
 
+    function isValidHppRecord(data) {
+      return data.keys().hasAll([
+          'ownerId', 'sourceType', 'orderId', 'invoiceNumber', 'customerName',
+          'division', 'recordDate', 'itemName', 'qty', 'unit',
+          'sellPriceTotal', 'hppUnit', 'hppTotal', 'boronganCost', 'otherCost',
+          'grossProfit', 'netProfit', 'hppComponents', 'syncToCash', 'notes',
+          'createdAt', 'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'ownerId', 'sourceType', 'orderId', 'invoiceNumber', 'customerName',
+          'division', 'recordDate', 'itemName', 'qty', 'unit',
+          'sellPriceTotal', 'hppUnit', 'hppTotal', 'boronganCost', 'otherCost',
+          'grossProfit', 'netProfit', 'hppComponents', 'syncToCash', 'notes',
+          'createdAt', 'updatedAt'
+        ])
+        && isValidId(data.ownerId)
+        && data.ownerId == request.auth.uid
+        && data.sourceType is string && data.sourceType in ['order', 'manual']
+        && data.orderId is string && data.orderId.size() <= 128
+        && (data.sourceType == 'manual' ? data.orderId.size() == 0 : isValidId(data.orderId))
+        && data.invoiceNumber is string && data.invoiceNumber.size() <= 40
+        && data.customerName is string && data.customerName.size() <= 120
+        && isValidDivision(data.division)
+        && isValidDateString(data.recordDate)
+        && data.itemName is string && data.itemName.size() >= 1 && data.itemName.size() <= 160
+        && data.qty is number && data.qty >= 1 && data.qty <= 1000000
+        && data.unit is string && data.unit.size() >= 1 && data.unit.size() <= 30
+        && data.sellPriceTotal is number && data.sellPriceTotal >= 0 && data.sellPriceTotal <= 10000000000
+        && data.hppUnit is number && data.hppUnit >= 0 && data.hppUnit <= 1000000000
+        && data.hppTotal is number && data.hppTotal >= 0 && data.hppTotal <= 10000000000
+        && data.boronganCost is number && data.boronganCost >= 0 && data.boronganCost <= 10000000000
+        && data.otherCost is number && data.otherCost >= 0 && data.otherCost <= 10000000000
+        && data.grossProfit is number && data.grossProfit >= -10000000000 && data.grossProfit <= 10000000000
+        && data.netProfit is number && data.netProfit >= -10000000000 && data.netProfit <= 10000000000
+        && data.hppComponents is list && data.hppComponents.size() <= 20
+        && (data.hppComponents.size() == 0 || data.hppComponents[0] is map)
+        && data.syncToCash is bool
+        && data.notes is string && data.notes.size() <= 400
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
     // -------------------------------------------------------------------------
     // Collection Rules
     // -------------------------------------------------------------------------
@@ -288,7 +380,7 @@ service cloud.firestore {
       allow delete: if isSignedIn() && isValidId(productId) && existing().ownerId == request.auth.uid;
     }
 
-    // 3. Customer Orders (DP, Balance, Production Status)
+    // 3. Customer Orders (DP, Balance, Production Status, Shirt Mockup & PO Spec)
     match /orders/{orderId} {
       allow get: if isSignedIn() && isValidId(orderId) && existing().ownerId == request.auth.uid;
       allow list: if isSignedIn() && existing().ownerId == request.auth.uid;
@@ -304,14 +396,14 @@ service cloud.firestore {
         && incoming().ownerId == existing().ownerId
         && incoming().createdAt == existing().createdAt
         && incoming().updatedAt == request.time
-        && !(existing().paymentStatus == 'lunas' && existing().productionStatus == 'diambil')
         && (
           incoming().diff(existing()).affectedKeys().hasOnly(['paidAmount', 'remainingAmount', 'paymentStatus', 'paymentMethod', 'updatedAt'])
           || incoming().diff(existing()).affectedKeys().hasOnly(['productionStatus', 'updatedAt'])
+          || incoming().diff(existing()).affectedKeys().hasOnly(['items', 'totalHpp', 'updatedAt'])
           || incoming().diff(existing()).affectedKeys().hasOnly([
             'customerName', 'customerPhone', 'division', 'orderDate', 'deadlineDate',
             'items', 'discount', 'totalAmount', 'totalHpp', 'paidAmount', 'remainingAmount',
-            'paymentStatus', 'productionStatus', 'paymentMethod', 'notes', 'updatedAt'
+            'paymentStatus', 'productionStatus', 'paymentMethod', 'notes', 'shirtSpec', 'updatedAt'
           ])
         );
       allow delete: if isSignedIn() && isValidId(orderId) && existing().ownerId == request.auth.uid;
@@ -420,6 +512,45 @@ service cloud.firestore {
       allow delete: if isSignedIn()
         && isValidId(logId)
         && existing().ownerId == request.auth.uid;
+    }
+
+    // 8. HPP History & Order Costing Records
+    match /hppRecords/{hppId} {
+      allow get: if isSignedIn() && isValidId(hppId) && existing().ownerId == request.auth.uid;
+      allow list: if isSignedIn() && existing().ownerId == request.auth.uid;
+      allow create: if isSignedIn()
+        && isValidId(hppId)
+        && isValidHppRecord(incoming())
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time
+        && (
+          incoming().sourceType == 'manual'
+          || (
+            existsAfter(/databases/$(database)/documents/orders/$(incoming().orderId))
+            && getAfter(/databases/$(database)/documents/orders/$(incoming().orderId)).data.ownerId == request.auth.uid
+          )
+        );
+      allow update: if isSignedIn()
+        && isValidId(hppId)
+        && isValidHppRecord(incoming())
+        && existing().ownerId == request.auth.uid
+        && incoming().ownerId == existing().ownerId
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time
+        && (
+          incoming().sourceType == 'manual'
+          || (
+            existsAfter(/databases/$(database)/documents/orders/$(incoming().orderId))
+            && getAfter(/databases/$(database)/documents/orders/$(incoming().orderId)).data.ownerId == request.auth.uid
+          )
+        )
+        && incoming().diff(existing()).affectedKeys().hasOnly([
+          'sourceType', 'orderId', 'invoiceNumber', 'customerName', 'division',
+          'recordDate', 'itemName', 'qty', 'unit', 'sellPriceTotal', 'hppUnit',
+          'hppTotal', 'boronganCost', 'otherCost', 'grossProfit', 'netProfit',
+          'hppComponents', 'syncToCash', 'notes', 'updatedAt'
+        ]);
+      allow delete: if isSignedIn() && isValidId(hppId) && existing().ownerId == request.auth.uid;
     }
   }
 }
